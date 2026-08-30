@@ -1,0 +1,6 @@
+# GQLM310 — empty Union selections
+
+Safety: manual. GraphQL-Ruby 2.5.3 began migrating toward rejecting Union
+fields without subselections. Set
+`allow_legacy_invalid_empty_selections_on_union` deliberately while fixing
+affected queries.

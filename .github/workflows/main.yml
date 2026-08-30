@@ -17,6 +17,8 @@ jobs:
     strategy:
       matrix:
         ruby:
+          - '3.3'
+          - '3.4'
           - '4.0'
 
     steps:
@@ -30,3 +32,19 @@ jobs:
           bundler-cache: true
       - name: Run the default task
         run: bundle exec rake
+
+  astel-main:
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: true
+      - run: git clone --depth 1 https://github.com/ydah/astel.git "$RUNNER_TEMP/astel"
+      - run: bundle config set local.astel "$RUNNER_TEMP/astel"
+      - run: bundle update astel
+      - run: bundle exec rake

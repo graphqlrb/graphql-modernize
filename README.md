@@ -1,39 +1,103 @@
-# Graphql::Modernize
+# graphql-modernize
 
-TODO: Delete this and the text below, and describe your gem
-
-Welcome to your new gem! In this directory, you'll find the files you need to be able to package up your Ruby library into a gem. Put your Ruby code in the file `lib/graphql/modernize`. To experiment with that code, run `bin/console` for an interactive prompt.
+`graphql-modernize` migrates deprecated graphql-ruby APIs without booting the
+application. It parses Ruby with Prism through [astel](https://github.com/ydah/astel),
+preserves formatting, validates every rewrite, and reports changes before writing.
 
 ## Installation
 
-TODO: Replace `UPDATE_WITH_YOUR_GEM_NAME_IMMEDIATELY_AFTER_RELEASE_TO_RUBYGEMS_ORG` with your gem name right after releasing it to RubyGems.org. Please do not do it earlier due to security reasons. Alternatively, replace this section with instructions to install your gem from git if you don't plan to release to RubyGems.org.
-
-Install the gem and add to the application's Gemfile by executing:
-
 ```bash
-bundle add UPDATE_WITH_YOUR_GEM_NAME_IMMEDIATELY_AFTER_RELEASE_TO_RUBYGEMS_ORG
+bundle add graphql-modernize
 ```
 
-If bundler is not being used to manage dependencies, install the gem by executing:
+Ruby 3.3 or newer is required. The tool does not depend on the `graphql` gem.
+
+## Quick start
+
+Start with a dry run:
 
 ```bash
-gem install UPDATE_WITH_YOUR_GEM_NAME_IMMEDIATELY_AFTER_RELEASE_TO_RUBYGEMS_ORG
+bundle exec graphql-modernize run
 ```
 
-## Usage
+Review the unified diff, then apply safe rules:
 
-TODO: Write usage instructions here
+```bash
+bundle exec graphql-modernize run --write
+git diff
+bundle exec rspec
+```
+
+Unsafe rules require an explicit opt-in and can be run one at a time:
+
+```bash
+bundle exec graphql-modernize run --only GQLM307 --unsafe --write
+```
+
+Useful commands:
+
+```text
+graphql-modernize list
+graphql-modernize explain GQLM307
+graphql-modernize doctor
+graphql-modernize run --format json
+graphql-modernize run --format github
+graphql-modernize run --format sarif --out results.sarif
+```
+
+Exit status is `0` when no unresolved offenses remain, `1` when manual or
+unfixed offenses remain, and `2` for configuration, parse (`--strict`), or
+internal errors.
+
+## Configuration
+
+Create `.graphql-modernize.yml` in the project root:
+
+```yaml
+from_version: "1.13"
+target_version: "2.6"
+ruby_version: "3.3"
+include: ["app/graphql/**/*.rb", "lib/graphql/**/*.rb"]
+exclude: ["app/graphql/legacy/**/*.rb"]
+base_classes:
+  object: ["ApplicationObjectType"]
+rules:
+  GQLM401:
+    enabled: true
+  GQLM307:
+    migration_errors: true
+apply_unsafe: false
+require_suppression_reason: true
+```
+
+CLI options override configuration. GQLM401 and GQLM402 are disabled by
+default because they can create large style-only diffs.
+
+## Suppression comments
+
+```ruby
+field :name, types.String # graphql-modernize:disable GQLM105 -- staged migration
+
+# graphql-modernize:disable GQLM401 -- keep explicit defaults here
+argument :id, ID, required: true
+# graphql-modernize:enable GQLM401
+```
+
+Use `graphql-modernize:disable-file GQLM101 -- reason` near the top of a file
+for file-wide suppression. Unused suppressions are reported as GQLM000.
+
+See [the migration guide](docs/migration-guide.md), [rule index](docs/rules/README.md),
+and [rule authoring guide](docs/writing-rules.md).
 
 ## Development
 
-After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake spec` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
-
-To install this gem onto your local machine, run `bundle exec rake install`. To release a new version, update the version number in `version.rb`, and then run `bundle exec rake release`, which will create a git tag for the version, push git commits and the created tag, and push the `.gem` file to [rubygems.org](https://rubygems.org).
+Run `bundle install`, then `bundle exec rake`. Build the gem with
+`bundle exec rake build`.
 
 ## Contributing
 
-Bug reports and pull requests are welcome on GitHub at https://github.com/[USERNAME]/graphql-modernize.
+Bug reports and pull requests are welcome at <https://github.com/ydah/graphql-modernize>.
 
 ## License
 
-The gem is available as open source under the terms of the [MIT License](https://opensource.org/licenses/MIT).
+The gem is available under the [MIT License](LICENSE.txt).

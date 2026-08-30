@@ -1,0 +1,32 @@
+name: Smoke
+
+on:
+  schedule:
+    - cron: '23 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  graphql-ruby:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: true
+      - run: git clone --depth 1 https://github.com/rmosolgo/graphql-ruby.git "$RUNNER_TEMP/graphql-ruby"
+      - name: Apply safe rules
+        run: >-
+          bundle exec graphql-modernize run "$RUNNER_TEMP/graphql-ruby/lib" "$RUNNER_TEMP/graphql-ruby/spec"
+          --only GQLM105,GQLM106,GQLM107,GQLM205,GQLM301,GQLM302,GQLM303,GQLM305,GQLM306
+          --write --force --strict --jobs 2 --no-diff
+      - name: Verify idempotence
+        run: >-
+          bundle exec graphql-modernize run "$RUNNER_TEMP/graphql-ruby/lib" "$RUNNER_TEMP/graphql-ruby/spec"
+          --only GQLM105,GQLM106,GQLM107,GQLM205,GQLM301,GQLM302,GQLM303,GQLM305,GQLM306
+          --write --force --strict --jobs 2 --no-diff
