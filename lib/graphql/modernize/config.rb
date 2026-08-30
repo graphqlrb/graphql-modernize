@@ -136,11 +136,15 @@ module GraphQL
       end
 
       def validate_versions!(ruby_version, from_version, target_version)
-        if ruby_version && !ruby_version.to_s.match?(/\A\d+\.\d+(?:\.\d+)?\z/)
+        if ruby_version && (!ruby_version.is_a?(String) || !ruby_version.match?(/\A\d+\.\d+(?:\.\d+)?\z/))
           raise Error, "ruby_version must use the X.Y format"
         end
 
-        [from_version, target_version].compact.each { |version| Gem::Version.new(version.to_s) }
+        [from_version, target_version].compact.each do |version|
+          raise Error, "versions must be strings" unless version.is_a?(String)
+
+          Gem::Version.new(version)
+        end
       end
 
       def locked_graphql_version

@@ -16,15 +16,17 @@ module GraphQL
           reason = match[:body].split("--", 2)[1]
           next if require_reason && match[:action] != "enable" && reason.to_s.strip.empty?
 
-          ids = match[:body].split("--", 2).first.scan(/GQLM\d{3}/)
+          rules_text = match[:body].split("--", 2).first.strip
+          ids = rules_text.split(/[,\s]+/)
+          valid_rules = rules_text.empty? || ids.all? { |id| id.match?(/\AGQLM\d{3}\z/) }
           line_start = source_file.line_start(comment.location.start_offset)
           prefix = source_file.source.byteslice(line_start, comment.location.start_offset - line_start)
           inline = !prefix.strip.empty?
-          valid = match[:action] != "disable-file" || (!inline &&
+          valid_file_position = match[:action] != "disable-file" || (!inline &&
             (!first_statement || comment.location.start_offset < first_statement.location.start_offset))
           Directive.new(action: match[:action].tr("-", "_").to_sym, line: comment.location.start_line,
-                        rules: ids.empty? ? nil : ids.freeze, location: comment.location,
-                        inline: inline, valid: valid, used: false)
+                        rules: rules_text.empty? ? nil : ids.freeze, location: comment.location,
+                        inline: inline, valid: valid_rules && valid_file_position, used: false)
         end
       end
 

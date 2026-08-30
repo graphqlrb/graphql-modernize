@@ -25,4 +25,16 @@ RSpec.describe GraphQL::Modernize::FileFinder do
       expect { finder.find([text]) }.to raise_error(GraphQL::Modernize::Error, /Ruby file/)
     end
   end
+
+  it "filters broad configured globs to Ruby files" do
+    Dir.mktmpdir do |root|
+      FileUtils.mkdir_p("#{root}/app/graphql/nested")
+      ruby = "#{root}/app/graphql/type.rb"
+      File.write(ruby, "")
+      File.write("#{root}/app/graphql/schema.graphql", "type Query { id: ID! }")
+      config = GraphQL::Modernize::Config.new(root: root, include_patterns: ["app/graphql/**/*"])
+
+      expect(described_class.new(config).find).to eq([ruby])
+    end
+  end
 end

@@ -86,7 +86,8 @@ module GraphQL
         end
 
         def inside?(node, *kinds)
-          kinds.include?(graphql_kind(node))
+          context = context_for(node)
+          kinds.include?(context&.graphql_kind) && !ClassHierarchy::DIRECT_KINDS.key?(context.class_name)
         end
 
         def standalone_line?(node)
@@ -100,6 +101,16 @@ module GraphQL
 
         def safe_to_discard?(node)
           node.static_literal? || node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
+        end
+
+        def constant_source(node)
+          source = node&.location&.slice
+          source&.delete_prefix("::")
+        end
+
+        def replace_constant(rewriter, node, replacement)
+          prefix = node.location.slice.start_with?("::") ? "::" : ""
+          rewriter.replace(node.location, "#{prefix}#{replacement}")
         end
       end
     end

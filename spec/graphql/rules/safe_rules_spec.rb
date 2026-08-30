@@ -9,6 +9,29 @@ RSpec.describe "safe migration rules" do
     )
   end
 
+  it "maps every legacy scalar without inventing constants" do
+    before = <<~RUBY
+      class UserType < Types::BaseObject
+        field :name, types.String
+        field :score, types.Float
+        field :enabled, types.Boolean
+        field :id, types.ID
+        field :custom, types.Custom
+      end
+    RUBY
+    after = <<~RUBY
+      class UserType < Types::BaseObject
+        field :name, String
+        field :score, Float
+        field :enabled, GraphQL::Types::Boolean
+        field :id, GraphQL::Types::ID
+        field :custom, types.Custom
+      end
+    RUBY
+
+    expect_correction(GraphQL::Modernize::Rules::TypesShortcut, before, after)
+  end
+
   it "renames property without changing formatting" do
     expect_correction(
       GraphQL::Modernize::Rules::PropertyOption,
@@ -31,6 +54,11 @@ RSpec.describe "safe migration rules" do
       "begin\nrescue GraphQL::Schema::Resolver::LoadApplicationObjectFailedError\nend\n",
       "begin\nrescue GraphQL::LoadApplicationObjectFailedError\nend\n"
     )
+    expect_correction(
+      GraphQL::Modernize::Rules::LoadApplicationObjectFailedError,
+      "begin\nrescue ::GraphQL::Schema::Resolver::LoadApplicationObjectFailedError\nend\n",
+      "begin\nrescue ::GraphQL::LoadApplicationObjectFailedError\nend\n"
+    )
   end
 
   {
@@ -43,6 +71,11 @@ RSpec.describe "safe migration rules" do
         rule,
         "class AppSchema < GraphQL::Schema\n  use #{plugin}\n  query Types::Query\nend\n",
         "class AppSchema < GraphQL::Schema\n  query Types::Query\nend\n"
+      )
+      expect_correction(
+        rule,
+        "class AppSchema < ::GraphQL::Schema\n  use ::#{plugin}\nend\n",
+        "class AppSchema < ::GraphQL::Schema\nend\n"
       )
     end
 
@@ -87,6 +120,20 @@ RSpec.describe "safe migration rules" do
 
     expect(offenses.map(&:safety)).to eq([:manual])
     expect(rewriter.rewrite(validate: :parse)).to eq(code)
+  end
+
+  it "does not rewrite graphql-ruby's framework base classes" do
+    code = <<~RUBY
+      module GraphQL
+        class Schema
+          use GraphQL::Pagination::Connections
+        end
+      end
+    RUBY
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::ConnectionsPlugin, code)
+
+    expect(offenses).to be_empty
+    expect(rewriter.rewrite).to eq(code)
   end
 
   it "does not match unrelated DSLs, receivers, strings, comments, or heredocs" do

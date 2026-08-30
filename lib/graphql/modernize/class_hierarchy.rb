@@ -5,7 +5,7 @@ module GraphQL
     class ClassHierarchy
       Declaration = Data.define(:path, :start_offset, :end_offset, :name, :superclass, :module_node)
       Definition = Data.define(:class_name, :path, :line)
-      Call = Data.define(:name, :first_argument)
+      Call = Data.define(:name, :first_argument, :path, :start_offset)
 
       DIRECT_KINDS = {
         "GraphQL::Schema::Object" => :object,
@@ -62,15 +62,11 @@ module GraphQL
 
       def calls_for(class_name) = ancestors(class_name).flat_map { |name| @calls[name] }
 
-      def method_defined?(class_name, method_name)
-        ancestors(class_name).any? { |name| @methods[name][method_name.to_sym] }
-      end
+      def method_defined?(class_name, method_name) = defined_in?(@methods, class_name, method_name)
 
-      def class_method_defined?(class_name, method_name)
-        ancestors(class_name).any? { |name| @class_methods[name][method_name.to_sym] }
-      end
+      def class_method_defined?(class_name, method_name) = defined_in?(@class_methods, class_name, method_name)
 
-      def visible_definitions = @visible_definitions.select { |definition| resolve_kind(definition.class_name) }
+      def visible_definitions = @visible_definitions.select { |definition| visible_definition?(definition) }
 
       def visibility_plugin?(class_name)
         calls_for(class_name).any? do |call|
@@ -86,7 +82,17 @@ module GraphQL
         end
       end
 
+      def visibility_plugin_misplaced?(class_name, path, start_offset)
+        @calls[normalize(class_name)].any? do |call|
+          call.path == path && call.start_offset > start_offset && %i[query mutation subscription].include?(call.name)
+        end
+      end
+
       private
+
+      def visible_definition?(item) = resolve_kind(item.class_name) && !DIRECT_KINDS.key?(item.class_name)
+
+      def defined_in?(table, class_name, name) = ancestors(class_name).any? { |ancestor| table[ancestor][name.to_sym] }
 
       def index(source_file)
         nodes = []
@@ -145,13 +151,16 @@ module GraphQL
           @declared_names[entry.name] = true
           @superclasses[entry.name] = entry.superclass if entry.superclass
         end
-        includes.each do |call|
+        includes.reject { |call| scopes.any? { |scope| nested_in?(scope, call) } }.each do |call|
           owner = owner_for(entries, call)
           @interface_names[owner.name] = true if owner&.module_node
         end
         calls.reject { |call| scopes.any? { |scope| nested_in?(scope, call) } }.each do |call|
           owner = owner_for(entries, call)
-          @calls[owner.name] << Call.new(name: call.name, first_argument: first_argument(call)) if owner
+          if owner
+            @calls[owner.name] << Call.new(name: call.name, first_argument: first_argument(call),
+                                           path: source_file.path, start_offset: call.location.start_offset)
+          end
         end
         methods.each do |node|
           owner = owner_for(entries, node)
@@ -196,7 +205,7 @@ module GraphQL
 
       def first_argument(call)
         argument = call.arguments&.arguments&.first
-        argument&.location&.slice
+        constant_name(argument) || argument&.location&.slice
       end
 
       def direct_kind(name)
@@ -231,9 +240,7 @@ module GraphQL
         nil
       end
 
-      def normalize(name)
-        name.to_s.delete_prefix("::")
-      end
+      def normalize(name) = name.to_s.delete_prefix("::")
     end
   end
 end

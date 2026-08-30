@@ -47,8 +47,9 @@ module GraphQL
         else
           @out.write(output)
         end
-        application.write(result) if options[:write]
-        return 2 if options[:strict] && result.parse_errors.any?
+        strict_failure = options[:strict] && result.parse_errors.any?
+        application.write(result) if options[:write] && !strict_failure
+        return 2 if strict_failure
 
         unresolved?(result, options[:fail_level]) ? 1 : 0
       end

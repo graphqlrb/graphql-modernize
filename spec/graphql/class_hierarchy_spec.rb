@@ -75,11 +75,19 @@ RSpec.describe GraphQL::Modernize::ClassHierarchy do
 
         def other.complexity_cost_calculation_mode_for(context) = :future
       end
+
+
+      module DeferredInterface
+        def self.install
+          include GraphQL::Schema::Interface
+        end
+      end
     RUBY
     hierarchy = described_class.new.build([types])
 
     expect(hierarchy.visibility_plugin?("AppSchema")).to be(false)
     expect(hierarchy.class_method_defined?("AppSchema", :complexity_cost_calculation_mode_for)).to be(false)
+    expect(hierarchy.resolve_kind("DeferredInterface")).to be_nil
   end
 
   it "selects only the highest project schema for Visibility insertion" do
@@ -94,5 +102,16 @@ RSpec.describe GraphQL::Modernize::ClassHierarchy do
 
     expect(hierarchy.visibility_plugin_target?("BaseSchema")).to be(true)
     expect(hierarchy.visibility_plugin_target?("AppSchema")).to be(false)
+  end
+
+  it "recognizes root-qualified Visibility configuration" do
+    types = source(<<~RUBY)
+      class AppSchema < ::GraphQL::Schema
+        use ::GraphQL::Schema::Visibility
+      end
+    RUBY
+    hierarchy = described_class.new.build([types])
+
+    expect(hierarchy.visibility_plugin?("AppSchema")).to be(true)
   end
 end

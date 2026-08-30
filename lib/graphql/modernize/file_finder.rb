@@ -11,7 +11,8 @@ module GraphQL
 
       def find(paths = [])
         candidates = paths.empty? ? configured_files : explicit_files(paths)
-        candidates.reject { |path| excluded?(path) }.uniq.sort
+        candidates.select { |path| File.file?(path) && path.end_with?(".rb") }
+                  .reject { |path| excluded?(path) }.uniq.sort
       end
 
       private

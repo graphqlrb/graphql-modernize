@@ -103,4 +103,20 @@ RSpec.describe GraphQL::Modernize::CLI do
       expect(error).to include("parse error")
     end
   end
+
+  it "does not write any source when strict parsing fails" do
+    Dir.mktmpdir do |root|
+      valid = File.join(root, "valid.rb")
+      broken = File.join(root, "broken.rb")
+      source = "class Type < Types::BaseObject\n  field :name, String, property: :name\nend\n"
+      File.write(valid, source)
+      File.write(broken, "class Broken <\n")
+
+      status, = invoke("run", valid, broken, "--only", "GQLM106", "--write", "--force",
+                       "--strict", "--jobs", "1")
+
+      expect(status).to eq(2)
+      expect(File.read(valid)).to eq(source)
+    end
+  end
 end

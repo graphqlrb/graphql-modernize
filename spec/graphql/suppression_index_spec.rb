@@ -76,4 +76,16 @@ RSpec.describe GraphQL::Modernize::SuppressionIndex do
     expect(offenses.map(&:rule_id)).to eq(["GQLM106"])
     expect(rewriter.rewrite).to include("property: :one", "method: :two")
   end
+
+  it "does not turn an invalid rule name into a wildcard suppression" do
+    code = <<~RUBY
+      class UserType < Types::BaseObject
+        field :name, String, property: :name # graphql-modernize:disable gqlm106
+      end
+    RUBY
+    offenses, rewriter = run_rule(rule, code)
+
+    expect(offenses.map(&:rule_id)).to contain_exactly("GQLM106", "GQLM000")
+    expect(rewriter.rewrite).to include("method: :name")
+  end
 end

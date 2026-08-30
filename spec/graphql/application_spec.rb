@@ -104,4 +104,61 @@ RSpec.describe GraphQL::Modernize::Application do
       expect(result.files.first.offenses).to all(be_corrected)
     end
   end
+
+  it "allows the initial rewrite plus the configured conflict retries" do
+    Dir.mktmpdir do |root|
+      path = File.join(root, "type.rb")
+      File.write(path, <<~RUBY)
+        class Type < Types::BaseObject
+          field :name, String, resolve: ->(obj, _args, _ctx) { obj.name },
+                property: :name, field: LEGACY, null: true
+        end
+      RUBY
+      config = GraphQL::Modernize::Config.new(
+        root: root,
+        apply_unsafe: true,
+        rules: { "GQLM402" => { "enabled" => true } },
+        iterations: 3
+      )
+      result = described_class.new(
+        config: config,
+        rules: [GraphQL::Modernize::Rules::ResolveFieldOption,
+                GraphQL::Modernize::Rules::PropertyOption,
+                GraphQL::Modernize::Rules::RemovedFieldOptions,
+                GraphQL::Modernize::Rules::RedundantNullTrue],
+        jobs: 1
+      ).run([path])
+
+      expect(result.iterations).to eq(5)
+      expect(result.files.first.rewritten).not_to include("resolve:", "property:", "field:", "null:")
+    end
+  end
+
+  it "still stops oscillating rewrites after the retry limit" do
+    forward = Class.new(GraphQL::Modernize::Rules::Base) do
+      rule id: "GQLM996", safety: :safe, summary: "test forward rewrite"
+      node_pattern :constant_read_node, "(constant_read_node name: :OLD)"
+
+      def on_match(node, _captures)
+        add_offense(node.location, message: "forward") { |rewriter| rewriter.replace(node.location, "NEW") }
+      end
+    end
+    backward = Class.new(GraphQL::Modernize::Rules::Base) do
+      rule id: "GQLM997", safety: :safe, summary: "test backward rewrite"
+      node_pattern :constant_read_node, "(constant_read_node name: :NEW)"
+
+      def on_match(node, _captures)
+        add_offense(node.location, message: "backward") { |rewriter| rewriter.replace(node.location, "OLD") }
+      end
+    end
+
+    Dir.mktmpdir do |root|
+      path = File.join(root, "value.rb")
+      File.write(path, "OLD\n")
+      config = GraphQL::Modernize::Config.new(root: root, iterations: 1)
+
+      expect { described_class.new(config: config, rules: [forward, backward], jobs: 1).run([path]) }
+        .to raise_error(GraphQL::Modernize::Error, /1 retry iterations.*GQLM996/)
+    end
+  end
 end

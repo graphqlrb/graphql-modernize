@@ -51,6 +51,10 @@ RSpec.describe GraphQL::Modernize::Config do
       .to raise_error(GraphQL::Modernize::Error, /Unknown settings/)
     expect { described_class.new(ruby_version: "latest") }
       .to raise_error(GraphQL::Modernize::Error, /ruby_version/)
+    expect { described_class.new(ruby_version: 3.3) }
+      .to raise_error(GraphQL::Modernize::Error, /ruby_version/)
+    expect { described_class.new(target_version: 2.6) }
+      .to raise_error(GraphQL::Modernize::Error, /version/)
   end
 
   it "normalizes configured rule IDs" do

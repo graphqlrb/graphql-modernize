@@ -18,6 +18,12 @@ RSpec.describe "advanced migration rules" do
       "class UpdateUser < GraphQL::Schema::RelayClassicMutation\nend\n",
       config: config
     )
+    expect_correction(
+      GraphQL::Modernize::Rules::FunctionSuperclass,
+      "class FindUser < ::GraphQL::Function\nend\n",
+      "class FindUser < ::GraphQL::Schema::Resolver\nend\n",
+      config: config
+    )
   end
 
   it "detects manual legacy migrations without editing" do
@@ -33,6 +39,22 @@ RSpec.describe "advanced migration rules" do
       expect(offenses.map(&:rule_id)).to eq([rule.metadata.id])
       expect(rewriter.rewrite).to eq(code)
     end
+  end
+
+  it "does not report legacy conversion internals on framework base classes" do
+    code = <<~RUBY
+      module GraphQL
+        class Schema
+          def deprecated_graphql_definition
+            graphql_definition(silence_deprecation_warning: true)
+          end
+        end
+      end
+    RUBY
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::DeprecatedDefinitionCall, code)
+
+    expect(offenses).to be_empty
+    expect(rewriter.rewrite).to eq(code)
   end
 
   it "converts a self-contained resolve lambda to a method before private" do
@@ -171,6 +193,56 @@ RSpec.describe "advanced migration rules" do
     end
   end
 
+  it "does not infer application visibility requirements from framework definitions" do
+    code = <<~RUBY
+      module GraphQL
+        class Schema
+          def self.visible?(_context) = true
+        end
+      end
+
+      class AppSchema < GraphQL::Schema
+      end
+    RUBY
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::VisibilityPlugin, code,
+                                  config: GraphQL::Modernize::Config.new(apply_unsafe: true))
+
+    expect(offenses).to be_empty
+    expect(rewriter.rewrite).to eq(code)
+  end
+
+  it "moves existing Visibility after root types without changing conditional setup" do
+    config = GraphQL::Modernize::Config.new(apply_unsafe: true)
+    before = <<~RUBY
+      class AppSchema < GraphQL::Schema
+        use GraphQL::Schema::Visibility, preload: true
+        query Types::Query
+      end
+    RUBY
+    after = <<~RUBY
+      class AppSchema < GraphQL::Schema
+        query Types::Query
+        use GraphQL::Schema::Visibility, preload: true
+      end
+    RUBY
+    expect_correction(GraphQL::Modernize::Rules::VisibilityPlugin, before, after, config: config)
+
+    conditional = <<~RUBY
+      class AppSchema < GraphQL::Schema
+        use GraphQL::Schema::Visibility if enabled
+        query Types::Query
+      end
+    RUBY
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::VisibilityPlugin, conditional, config: config)
+    expect(offenses.map(&:safety)).to eq([:manual])
+    expect(rewriter.rewrite).to eq(conditional)
+
+    commented = before.sub("preload: true", "preload: true # keep")
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::VisibilityPlugin, commented, config: config)
+    expect(offenses.map(&:safety)).to eq([:manual])
+    expect(rewriter.rewrite).to eq(commented)
+  end
+
   it "removes each obsolete pagination setting" do
     code = <<~RUBY
       GraphQL::Relay::ConnectionType.bidirectional_pagination = true
@@ -182,6 +254,11 @@ RSpec.describe "advanced migration rules" do
     expect(first.map(&:rule_id)).to eq(["GQLM305"])
     expect(second.map(&:rule_id)).to eq(["GQLM306"])
     expect(second_rewriter.rewrite).to eq("")
+
+    root_qualified = "::GraphQL::Relay::ConnectionType.default_nodes_field = true\n"
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::DefaultNodesField, root_qualified)
+    expect(offenses.map(&:rule_id)).to eq(["GQLM306"])
+    expect(rewriter.rewrite).to eq("")
   end
 
   it "does not break a conditional pagination setting" do

@@ -10,7 +10,7 @@ module GraphQL
 
         def on_match(node, _captures)
           context = context_for(node)
-          return unless context&.graphql_kind == :schema
+          return unless inside?(node, :schema)
 
           configured = hierarchy.calls_for(context.class_name).any? do |call|
             call.name == :complexity_cost_calculation_mode

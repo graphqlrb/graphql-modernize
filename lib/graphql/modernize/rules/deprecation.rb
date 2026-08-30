@@ -11,7 +11,7 @@ module GraphQL
 
           arguments = node.arguments&.arguments
           first_argument = arguments&.first
-          return unless first_argument && first_argument.location.slice == constant
+          return unless constant_source(first_argument) == constant
 
           if !arguments.one? || node.block || !standalone_line?(node)
             return add_offense(node.location, safety: :manual,
@@ -62,7 +62,7 @@ module GraphQL
 
       class ErrorBubbling < Base
         rule id: "GQLM304", safety: :manual, summary: "Review error_bubbling(true)",
-             since: "2.3.0", docs: "docs/rules/GQLM304.md"
+             since: "2.2.7", docs: "docs/rules/GQLM304.md"
         node_pattern :call_node, "(call_node receiver: nil name: :error_bubbling)"
 
         def on_match(node, _captures)
@@ -79,7 +79,7 @@ module GraphQL
         def remove_setting(node, name)
           return unless node.name == name
 
-          receiver = node.receiver&.location&.slice
+          receiver = constant_source(node.receiver)
           return unless receiver == "GraphQL::Relay::ConnectionType"
 
           label = node.name.to_s.delete_suffix("=")
@@ -121,10 +121,11 @@ module GraphQL
         rule id: "GQLM307", safety: :unsafe, summary: "Add the Visibility plugin required by visible?",
              since: "2.4.0", docs: "docs/rules/GQLM307.md"
         node_pattern :class_node, "(class_node)"
+        node_pattern :call_node, "(call_node receiver: nil name: :use)", handler: :on_visibility_call
 
         def on_match(node, _captures)
           context = context_for(node)
-          return unless context&.graphql_kind == :schema
+          return unless inside?(node, :schema)
           return if hierarchy.visible_definitions.empty? || !hierarchy.visibility_plugin_target?(context.class_name)
 
           definition = hierarchy.visible_definitions.first
@@ -132,6 +133,28 @@ module GraphQL
           migration_errors = config.rule_options(self.class.metadata.id).fetch("migration_errors", true)
           plugin = "use GraphQL::Schema::Visibility, migration_errors: #{migration_errors}"
           add_offense(node.location, message: message) { |rw| rw.insert_into_body(node, plugin, position: :end) }
+        end
+
+        def on_visibility_call(node, _captures)
+          context = context_for(node)
+          return unless inside?(node, :schema)
+          return unless constant_source(node.arguments&.arguments&.first) == "GraphQL::Schema::Visibility"
+          return unless hierarchy.visibility_plugin_misplaced?(context.class_name, rewriter.source_file.path,
+                                                               node.location.start_offset)
+
+          message = "Move `use GraphQL::Schema::Visibility` after root type configuration"
+          line_end = rewriter.source_file.line_end(node.location.end_offset - 1)
+          trailing = rewriter.source_file.source.byteslice(node.location.end_offset,
+                                                           line_end - node.location.end_offset).strip
+          if node.block || !standalone_line?(node) || !trailing.empty?
+            return add_offense(node.location, safety: :manual, message: message)
+          end
+
+          source = rewriter.dedent(node.location.slice)
+          add_offense(node.location, message: message) do |rw|
+            rw.remove_line(node)
+            rw.insert_into_body(context.class_node, source, position: :end)
+          end
         end
       end
 
@@ -168,7 +191,7 @@ module GraphQL
 
         def on_match(node, _captures)
           context = context_for(node)
-          return unless context&.graphql_kind == :schema
+          return unless inside?(node, :schema)
 
           configured = hierarchy.calls_for(context.class_name).any? do |call|
             call.name == :allow_legacy_invalid_empty_selections_on_union

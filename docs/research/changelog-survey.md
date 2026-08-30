@@ -20,7 +20,7 @@ the historical official upgrader, rubocop-graphql's cop list, and astel 0.2.0.
 | GQLM301 Interpreter plugin | default since 1.12 | yes | remove line | safe |
 | GQLM302 Analysis::AST plugin | default since 1.12 | yes | remove line | safe |
 | GQLM303 Connections plugin | default since 1.12 | yes | remove line | safe |
-| GQLM304 `error_bubbling(true)` | deprecated 2.3.0 | yes | guidance only | manual |
+| GQLM304 `error_bubbling(true)` | deprecated 2.2.7 | yes | guidance only | manual |
 | GQLM305 bidirectional pagination setting | deprecated 1.13.10 | yes | remove line | safe |
 | GQLM306 default nodes setting | deprecated 1.13.10 | yes | remove line | safe |
 | GQLM307 custom `visible?` without visibility plugin | required since 2.4.0 | project scan | insert plugin | unsafe |

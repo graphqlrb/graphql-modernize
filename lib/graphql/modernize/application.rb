@@ -29,7 +29,7 @@ module GraphQL
         parse_errors = []
         iterations = 0
 
-        (@config.iterations + 1).times do |iteration|
+        (@config.iterations + 2).times do |iteration|
           iterations = iteration + 1
           source_files = parse_sources(current, parse_errors)
           hierarchy = ClassHierarchy.new(base_classes: @config.base_classes).build(source_files)
@@ -44,7 +44,7 @@ module GraphQL
           end
           break unless changed
 
-          next unless iterations > @config.iterations
+          next unless iterations > @config.iterations + 1
 
           rule_ids = iteration_results.flat_map do |_path, _rewritten, found|
             found.filter_map do |offense|
@@ -52,7 +52,7 @@ module GraphQL
             end
           end.uniq.sort
           detail = rule_ids.empty? ? "" : " (related rules: #{rule_ids.join(', ')})"
-          raise Error, "rewrites did not converge after #{@config.iterations} iterations#{detail}"
+          raise Error, "rewrites did not converge after #{@config.iterations} retry iterations#{detail}"
         end
 
         results = originals.map do |path, source|

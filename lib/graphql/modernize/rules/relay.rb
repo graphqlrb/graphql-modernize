@@ -9,10 +9,10 @@ module GraphQL
         node_pattern :class_node, "(class_node)"
 
         def on_match(node, _captures)
-          return unless node.superclass&.location&.slice == "GraphQL::Relay::Mutation"
+          return unless constant_source(node.superclass) == "GraphQL::Relay::Mutation"
 
           add_offense(node.superclass.location, message: "Migrate to RelayClassicMutation") do |rw|
-            rw.replace(node.superclass.location, "GraphQL::Schema::RelayClassicMutation")
+            replace_constant(rw, node.superclass, "GraphQL::Schema::RelayClassicMutation")
           end
         end
       end
@@ -23,7 +23,7 @@ module GraphQL
         node_pattern :call_node, "(call_node name: :create_type)"
 
         def on_match(node, _captures)
-          return unless node.receiver&.location&.slice == "GraphQL::Relay::ConnectionType"
+          return unless constant_source(node.receiver) == "GraphQL::Relay::ConnectionType"
 
           add_offense(node.location, message: "Migrate to the generated type's `connection_type` manually")
         end
@@ -35,7 +35,7 @@ module GraphQL
         node_pattern :call_node, "(call_node name: :field)"
 
         def on_match(node, _captures)
-          return unless node.receiver&.location&.slice == "GraphQL::Relay::Node"
+          return unless constant_source(node.receiver) == "GraphQL::Relay::Node"
 
           add_offense(node.location, message: "Migrate to `implements GraphQL::Types::Relay::Node`")
         end
@@ -47,7 +47,7 @@ module GraphQL
         node_pattern :class_node, "(class_node)"
 
         def on_match(node, _captures)
-          return unless node.superclass&.location&.slice == "GraphQL::Types::Relay::BaseConnection"
+          return unless constant_source(node.superclass) == "GraphQL::Types::Relay::BaseConnection"
 
           add_offense(node.superclass.location, message: "Inherit from the application's `Types::BaseConnection`")
         end
@@ -62,10 +62,10 @@ module GraphQL
         node_pattern :constant_path_node, "(constant_path_node name: :LoadApplicationObjectFailedError)"
 
         def on_match(node, _captures)
-          return unless node.location.slice == OLD_NAME
+          return unless constant_source(node) == OLD_NAME
 
           add_offense(node.location, message: "Replace `#{OLD_NAME}` with `#{NEW_NAME}`") do |rw|
-            rw.replace(node.location, NEW_NAME)
+            replace_constant(rw, node, NEW_NAME)
           end
         end
       end

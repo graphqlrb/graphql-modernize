@@ -1,4 +1,6 @@
 # GQLM105 — `types.X`
 
-Safety: safe. Rewrites class-based schema references such as `types.String` to
-`String` and `types.Int` to `Integer` while leaving unrelated DSLs untouched.
+Safety: safe. Rewrites the five legacy `TypeDefiner` scalars: `String` and
+`Float` keep their Ruby classes, `Int` becomes `Integer`, and `Boolean` / `ID`
+become `GraphQL::Types::Boolean` / `GraphQL::Types::ID`. Other `types.X` calls
+are left unchanged.

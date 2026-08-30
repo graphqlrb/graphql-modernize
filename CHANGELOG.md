@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Correct all five legacy scalar mappings and ignore unknown `types.X` calls.
+- Move existing Visibility setup below root types and exclude graphql-ruby's
+  framework base classes from application migrations.
+- Keep strict runs write-free on parse errors and make suppression, file glob,
+  version, and conflict-retry boundaries fail safely.
 - Place Visibility after root schema configuration for GraphQL-Ruby 2.6.3+.
 - Preserve side effects in conditional or block-based removals and legacy
   resolver lambdas that cannot be converted safely.

@@ -9,7 +9,7 @@ module GraphQL
         node_pattern :call_node, "(call_node name: :define)"
 
         def on_match(node, _captures)
-          receiver = node.receiver&.location&.slice
+          receiver = constant_source(node.receiver)
           return unless receiver&.match?(/\AGraphQL::(?:Object|InputObject|Interface|Enum|Scalar|Union)Type\z/) ||
                         receiver == "GraphQL::Relay::Mutation"
 
@@ -145,10 +145,10 @@ module GraphQL
         node_pattern :class_node, "(class_node)"
 
         def on_match(node, _captures)
-          return unless node.superclass&.location&.slice == "GraphQL::Function"
+          return unless constant_source(node.superclass) == "GraphQL::Function"
 
           add_offense(node.superclass.location, message: "Migrate `GraphQL::Function` to Resolver") do |rw|
-            rw.replace(node.superclass.location, "GraphQL::Schema::Resolver")
+            replace_constant(rw, node.superclass, "GraphQL::Schema::Resolver")
           end
         end
       end
@@ -161,6 +161,9 @@ module GraphQL
         def on_match(node, _captures)
           return unless %i[to_graphql graphql_definition].include?(node.name)
 
+          context = context_for(node)
+          return if context && ClassHierarchy::DIRECT_KINDS.key?(context.class_name)
+
           add_offense(node.message_loc, message: "`#{node.name}` was removed; review this call manually")
         end
       end
@@ -171,13 +174,21 @@ module GraphQL
         node_pattern :constant_path_node, "(constant_path_node name: :Arguments)"
 
         def on_match(node, _captures)
-          return unless node.location.slice == "GraphQL::Query::Arguments"
+          return unless constant_source(node) == "GraphQL::Query::Arguments"
 
           add_offense(node.location, message: "Migrate this use of `GraphQL::Query::Arguments` manually")
         end
       end
 
       class TypesShortcut < Base
+        REPLACEMENTS = {
+          "Boolean" => "GraphQL::Types::Boolean",
+          "Float" => "Float",
+          "ID" => "GraphQL::Types::ID",
+          "Int" => "Integer",
+          "String" => "String"
+        }.freeze
+
         rule id: "GQLM105", safety: :safe, summary: "Replace `types.X` with class references",
              removed_in: "2.0.0", docs: "docs/rules/GQLM105.md"
         node_pattern :call_node, "(call_node receiver: (call_node receiver: nil name: :types))"
@@ -186,9 +197,9 @@ module GraphQL
           return unless inside?(node, :object, :input_object, :interface, :resolver, :mutation, :subscription)
 
           name = node.message_loc.slice
-          return unless name.match?(/\A[A-Z]\w*[!?]?\z/)
+          replacement = REPLACEMENTS[name]
+          return unless replacement
 
-          replacement = name == "Int" ? "Integer" : name
           add_offense(node.location, message: "Replace `types.#{name}` with `#{replacement}`") do |rw|
             rw.replace(node.location, replacement)
           end
