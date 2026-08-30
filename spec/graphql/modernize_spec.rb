@@ -1,11 +1,7 @@
 # frozen_string_literal: true
 
-RSpec.describe Graphql::Modernize do
+RSpec.describe GraphQL::Modernize do
   it "has a version number" do
-    expect(Graphql::Modernize::VERSION).not_to be nil
-  end
-
-  it "does something useful" do
-    expect(false).to eq(true)
+    expect(GraphQL::Modernize::VERSION).not_to be nil
   end
 end

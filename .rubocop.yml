@@ -1,0 +1,39 @@
+AllCops:
+  NewCops: enable
+  SuggestExtensions: false
+  TargetRubyVersion: 3.3
+
+Layout/LineLength:
+  Max: 120
+
+Metrics/AbcSize:
+  Max: 100
+
+Metrics/BlockLength:
+  Exclude:
+    - "*.gemspec"
+    - "spec/**/*"
+
+Metrics/ClassLength:
+  Max: 200
+
+Metrics/CyclomaticComplexity:
+  Max: 30
+
+Metrics/MethodLength:
+  Max: 50
+
+Metrics/ParameterLists:
+  Max: 8
+
+Metrics/PerceivedComplexity:
+  Max: 30
+
+Style/Documentation:
+  Enabled: false
+
+Style/MultilineBlockChain:
+  Enabled: false
+
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
