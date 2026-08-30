@@ -22,4 +22,16 @@ RSpec.describe GraphQL::Modernize::Application do
       expect(result.files.flat_map(&:offenses)).to all(be_corrected)
     end
   end
+
+  it "does not treat source encoding normalization as a rewrite" do
+    Dir.mktmpdir do |root|
+      path = File.join(root, "type.rb")
+      File.binwrite(path, "# café\nclass Type < Types::BaseObject\nend\n")
+      config = GraphQL::Modernize::Config.new(root: root, iterations: 1)
+      result = described_class.new(config: config, rules: [], jobs: 1).run([path])
+
+      expect(result.iterations).to eq(1)
+      expect(result.files.first.rewritten).to eq(result.files.first.source_file.source)
+    end
+  end
 end

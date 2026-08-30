@@ -25,8 +25,10 @@ the historical official upgrader, rubocop-graphql's cop list, and astel 0.2.0.
 | GQLM306 default nodes setting | deprecated 1.13.10 | yes | remove line | safe |
 | GQLM307 custom `visible?` without visibility plugin | required since 2.4.0 | project scan | insert plugin | unsafe |
 | GQLM308 possible type/reference keys | changed 2.3.5 | yes | guidance only | manual |
+| GQLM310 empty Union selections | deprecated behavior 2.5.3 | schema scan | guidance only | manual |
 | GQLM401 `required: true` | default since 1.13.0 | yes | remove option | safe, opt-in |
 | GQLM402 `null: true` | default since 1.13.0 | yes | remove option | safe, opt-in |
+| GQLM501 complexity cost mode | migration support 2.5.3 | schema scan | guidance only | manual |
 
 The remaining catalog entries need application-specific intent or do not have a
 single generally correct rewrite, so they are reported as manual guidance.

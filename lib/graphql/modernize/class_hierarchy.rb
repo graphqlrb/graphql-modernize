@@ -4,6 +4,8 @@ module GraphQL
   module Modernize
     class ClassHierarchy
       Declaration = Data.define(:path, :start_offset, :end_offset, :name, :superclass, :module_node)
+      Definition = Data.define(:class_name, :path, :line)
+      Call = Data.define(:name, :first_argument)
 
       DIRECT_KINDS = {
         "GraphQL::Schema::Object" => :object,
@@ -34,6 +36,8 @@ module GraphQL
         @declarations = {}
         @superclasses = {}
         @interface_names = {}
+        @visible_definitions = []
+        @calls = Hash.new { |hash, name| hash[name] = [] }
       end
 
       def build(source_files)
@@ -58,18 +62,36 @@ module GraphQL
         declarations.fetch(source_file.path, {})[start_offset]
       end
 
+      def calls_for(class_name)
+        @calls[normalize(class_name)]
+      end
+
+      def visible_definitions
+        @visible_definitions.select { |definition| resolve_kind(definition.class_name) }
+      end
+
+      def visibility_plugin?(class_name)
+        calls_for(class_name).any? do |call|
+          call.name == :use && %w[GraphQL::Schema::Visibility GraphQL::Schema::Warden].include?(call.first_argument)
+        end
+      end
+
       private
 
       def index(source_file)
         nodes = []
         includes = []
+        calls = []
+        visible_methods = []
         dispatcher = Astel::Dispatcher.new
         dispatcher.on(:class_node) { |node| nodes << [node, false] }
         dispatcher.on(:module_node) { |node| nodes << [node, true] }
         dispatcher.on(:call_node) do |node|
+          calls << node
           includes << node if node.receiver.nil? && node.name == :include &&
                               node.arguments&.arguments&.any? { |arg| constant_name(arg) == "GraphQL::Schema::Interface" }
         end
+        dispatcher.on(:def_node) { |node| visible_methods << node if node.name == :visible? }
         dispatcher.run(source_file.ast)
 
         name_cache = {}.compare_by_identity
@@ -95,15 +117,27 @@ module GraphQL
         end
         offset_map = entries.to_h { |entry| [entry.start_offset, entry] }
         @declarations[source_file.path] = offset_map
+        index_metadata(source_file, entries, includes, calls, visible_methods)
+      end
 
-        offset_map.each_value do |entry|
+      def index_metadata(source_file, entries, includes, calls, visible_methods)
+        entries.each do |entry|
           @superclasses[entry.name] = entry.superclass if entry.superclass
         end
         includes.each do |call|
-          owner = entries.select do |entry|
-            call.location.start_offset > entry.start_offset && call.location.end_offset < entry.end_offset
-          end.min_by { |entry| entry.end_offset - entry.start_offset }
+          owner = owner_for(entries, call)
           @interface_names[owner.name] = true if owner&.module_node
+        end
+        calls.each do |call|
+          owner = owner_for(entries, call)
+          @calls[owner.name] << Call.new(name: call.name, first_argument: first_argument(call)) if owner
+        end
+        visible_methods.each do |node|
+          owner = owner_for(entries, node)
+          next unless owner
+
+          @visible_definitions << Definition.new(class_name: owner.name, path: source_file.path,
+                                                 line: node.location.start_line)
         end
       end
 
@@ -120,6 +154,17 @@ module GraphQL
           namespace.pop
         end
         superclass
+      end
+
+      def owner_for(entries, node)
+        entries.select do |entry|
+          node.location.start_offset > entry.start_offset && node.location.end_offset < entry.end_offset
+        end.min_by { |entry| entry.end_offset - entry.start_offset }
+      end
+
+      def first_argument(call)
+        argument = call.arguments&.arguments&.first
+        argument&.location&.slice
       end
 
       def direct_kind(name)

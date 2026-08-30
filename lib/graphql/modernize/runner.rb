@@ -15,7 +15,8 @@ module GraphQL
         suppression = SuppressionIndex.new(source_file, require_reason: @config.require_suppression_reason)
         instances = rules.select { |rule| @config.rule_enabled?(rule.metadata) }
                          .map do |rule|
-          rule.new(context: context, rewriter: rewriter, config: @config, suppression: suppression)
+          rule.new(context: context, rewriter: rewriter, config: @config, suppression: suppression,
+                   hierarchy: @hierarchy)
         end
 
         instances.each do |rule|

@@ -3,6 +3,71 @@
 module GraphQL
   module Modernize
     module Rules
+      class DefineDsl < Base
+        rule id: "GQLM101", safety: :manual, summary: "Migrate the `.define` DSL to the class-based API",
+             since: "1.10.0", removed_in: "2.0.0", docs: "docs/rules/GQLM101.md"
+        node_pattern :call_node, "(call_node name: :define)"
+
+        def on_match(node, _captures)
+          receiver = node.receiver&.location&.slice
+          return unless receiver&.match?(/\AGraphQL::(?:Object|InputObject|Interface|Enum|Scalar|Union)Type\z/) ||
+                        receiver == "GraphQL::Relay::Mutation"
+
+          add_offense(node.message_loc, message: "Migrate the `.define` DSL to the class-based API manually")
+        end
+      end
+
+      class ResolveFieldOption < Base
+        rule id: "GQLM102", safety: :manual, summary: "Move `resolve:` field options to resolver methods",
+             removed_in: "2.0.1", docs: "docs/rules/GQLM102.md"
+        node_pattern :call_node, "(call_node receiver: nil name: :field)"
+
+        def on_match(node, _captures)
+          return unless inside?(node, :object, :interface)
+
+          argument = rewriter.find_keyword_argument(node, :resolve)
+          add_offense(argument.location, message: "Move `resolve:` logic to a resolver method manually") if argument
+        end
+      end
+
+      class FunctionSuperclass < Base
+        rule id: "GQLM103", safety: :unsafe, summary: "Migrate GraphQL::Function to Resolver",
+             removed_in: "2.0.0", docs: "docs/rules/GQLM103.md"
+        node_pattern :class_node, "(class_node)"
+
+        def on_match(node, _captures)
+          return unless node.superclass&.location&.slice == "GraphQL::Function"
+
+          add_offense(node.superclass.location, message: "Migrate `GraphQL::Function` to Resolver") do |rw|
+            rw.replace(node.superclass.location, "GraphQL::Schema::Resolver")
+          end
+        end
+      end
+
+      class DeprecatedDefinitionCall < Base
+        rule id: "GQLM104", safety: :manual, summary: "Remove legacy definition conversion calls",
+             removed_in: "2.0.0", docs: "docs/rules/GQLM104.md"
+        node_pattern :call_node, "(call_node)"
+
+        def on_match(node, _captures)
+          return unless %i[to_graphql graphql_definition].include?(node.name)
+
+          add_offense(node.message_loc, message: "`#{node.name}` was removed; review this call manually")
+        end
+      end
+
+      class QueryArgumentsConstant < Base
+        rule id: "GQLM108", safety: :manual, summary: "Migrate GraphQL::Query::Arguments references",
+             removed_in: "2.0.0", docs: "docs/rules/GQLM108.md"
+        node_pattern :constant_path_node, "(constant_path_node name: :Arguments)"
+
+        def on_match(node, _captures)
+          return unless node.location.slice == "GraphQL::Query::Arguments"
+
+          add_offense(node.location, message: "Migrate this use of `GraphQL::Query::Arguments` manually")
+        end
+      end
+
       class TypesShortcut < Base
         rule id: "GQLM105", safety: :safe, summary: "Replace `types.X` with class references",
              removed_in: "2.0.0", docs: "docs/rules/GQLM105.md"

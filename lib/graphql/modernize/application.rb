@@ -17,7 +17,10 @@ module GraphQL
 
       def run(paths = [])
         files = FileFinder.new(@config).find(paths)
-        originals = files.to_h { |path| [path, File.binread(path)] }
+        originals = files.to_h do |path|
+          source_file = Astel::SourceFile.parse(path: path, version: @config.ruby_version)
+          [path, source_file.source]
+        end
         current = originals.dup
         offenses = Hash.new { |hash, path| hash[path] = {} }
         parse_errors = []
