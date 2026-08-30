@@ -9,6 +9,7 @@ module GraphQL
         def remove_plugin(node, constant)
           return unless inside?(node, :schema)
           return unless node.arguments&.arguments&.one? && node.arguments.arguments.first.location.slice == constant
+          return unless standalone_line?(node)
 
           add_offense(node.location, message: "Remove `use #{constant}` because it is now the default") do |rw|
             rw.remove_line(node)
@@ -73,6 +74,7 @@ module GraphQL
 
           receiver = node.receiver&.location&.slice
           return unless inside?(node, :schema) || receiver&.start_with?("GraphQL::")
+          return unless standalone_line?(node)
 
           label = node.name.to_s.delete_suffix("=")
           add_offense(node.location, message: "Remove the obsolete `#{label}` setting") { |rw| rw.remove_line(node) }
@@ -117,7 +119,7 @@ module GraphQL
           message = "visible? (#{definition.path}:#{definition.line}) requires a Visibility plugin"
           migration_errors = config.rule_options(self.class.metadata.id).fetch("migration_errors", true)
           plugin = "use GraphQL::Schema::Visibility, migration_errors: #{migration_errors}"
-          add_offense(node.location, message: message) { |rw| rw.insert_into_body(node, plugin, position: :end) }
+          add_offense(node.location, message: message) { |rw| rw.insert_into_body(node, plugin, position: :beginning) }
         end
       end
 

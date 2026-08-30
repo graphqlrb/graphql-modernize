@@ -3,7 +3,7 @@
 | ID | Safety | Migration |
 |---|---|---|
 | [GQLM101](GQLM101.md) | manual | `.define` DSL |
-| [GQLM102](GQLM102.md) | manual | `resolve:` option |
+| [GQLM102](GQLM102.md) | unsafe/manual fallback | `resolve:` option |
 | [GQLM103](GQLM103.md) | unsafe | `GraphQL::Function` |
 | [GQLM104](GQLM104.md) | manual | legacy definition calls |
 | [GQLM105](GQLM105.md) | safe | `types.X` |

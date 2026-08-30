@@ -18,7 +18,15 @@ module GraphQL
       end
 
       class ResolveFieldOption < Base
-        rule id: "GQLM102", safety: :manual, summary: "Move `resolve:` field options to resolver methods",
+        UNSUPPORTED_NODES = [
+          Prism::BlockNode, Prism::LambdaNode, Prism::DefNode, Prism::ClassNode, Prism::ModuleNode,
+          Prism::SelfNode, Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode,
+          Prism::ClassVariableReadNode, Prism::ClassVariableWriteNode,
+          Prism::GlobalVariableReadNode, Prism::GlobalVariableWriteNode,
+          Prism::SuperNode, Prism::ForwardingSuperNode, Prism::YieldNode
+        ].freeze
+
+        rule id: "GQLM102", safety: :unsafe, summary: "Move `resolve:` field options to resolver methods",
              removed_in: "2.0.1", docs: "docs/rules/GQLM102.md"
         node_pattern :call_node, "(call_node receiver: nil name: :field)"
 
@@ -26,7 +34,104 @@ module GraphQL
           return unless inside?(node, :object, :interface)
 
           argument = rewriter.find_keyword_argument(node, :resolve)
-          add_offense(argument.location, message: "Move `resolve:` logic to a resolver method manually") if argument
+          return unless argument
+
+          method_name = field_method_name(node)
+          lambda_node = argument.value
+          unless convertible?(node, lambda_node, method_name)
+            return add_offense(argument.location, safety: :manual,
+                                                  message: "Move `resolve:` logic to a resolver method manually")
+          end
+
+          @generated_method_names ||= {}
+          if @generated_method_names[method_name] || hierarchy.method_defined?(context_for(node).class_name,
+                                                                               method_name)
+            return add_offense(argument.location, safety: :manual,
+                                                  message: "`#{method_name}` already exists; migrate manually")
+          end
+          @generated_method_names[method_name] = true
+
+          body = resolver_body(lambda_node)
+          method_source = "def #{method_name}\n#{indent_body(body)}\nend"
+          add_offense(argument.location, message: "Move `resolve:` to the `#{method_name}` method") do |rw|
+            rw.remove_keyword_argument(node, :resolve)
+            rw.insert_into_body(context_for(node).class_node, method_source, position: :before_private)
+          end
+        end
+
+        private
+
+        def field_method_name(node)
+          field_name = node.arguments&.arguments&.first
+          name = case field_name
+                 when Prism::SymbolNode, Prism::StringNode then field_name.unescaped
+                 end
+          name if name&.match?(/\A[a-z_]\w*[!?]?\z/)
+        end
+
+        def convertible?(field, lambda_node, method_name)
+          return false unless method_name && lambda_node.is_a?(Prism::LambdaNode) && lambda_node.body
+          return false unless body_boundaries_are_whitespace?(lambda_node)
+          return false if %i[method resolver_method hash_key].any? do |name|
+            rewriter.find_keyword_argument(field, name)
+          end
+
+          parameters = lambda_node.parameters&.parameters
+          return false unless simple_parameters?(parameters)
+
+          names = parameters.requireds.map(&:name)
+          safe_body?(lambda_node.body, names)
+        end
+
+        def simple_parameters?(parameters)
+          parameters && parameters.requireds.length == 3 && parameters.optionals.empty? && !parameters.rest &&
+            parameters.posts.empty? && parameters.keywords.empty? && !parameters.keyword_rest && !parameters.block
+        end
+
+        def safe_body?(body, names)
+          nodes = descendants(body)
+          return false if nodes.any? { |child| UNSUPPORTED_NODES.any? { |type| child.is_a?(type) } }
+          return false if nodes.any? do |child|
+            child.respond_to?(:name) && names.values_at(0, 2).include?(child.name) &&
+            (child.is_a?(Prism::LocalVariableTargetNode) || child.class.name.end_with?("WriteNode"))
+          end
+          return false if nodes.grep(Prism::LocalVariableReadNode).any? { |read| read.depth.positive? }
+          return false if nodes.grep(Prism::LocalVariableReadNode).any? { |read| read.name == names[1] }
+          return false if nodes.grep(Prism::CallNode).any? { |call| call.receiver.nil? }
+
+          true
+        end
+
+        def body_boundaries_are_whitespace?(lambda_node)
+          source = rewriter.source_file.source
+          prefix = source.byteslice(lambda_node.opening_loc.end_offset,
+                                    lambda_node.body.location.start_offset - lambda_node.opening_loc.end_offset)
+          suffix = source.byteslice(lambda_node.body.location.end_offset,
+                                    lambda_node.closing_loc.start_offset - lambda_node.body.location.end_offset)
+          prefix.strip.empty? && suffix.strip.empty?
+        end
+
+        def resolver_body(lambda_node)
+          body = lambda_node.body.location.slice.dup
+          parameters = lambda_node.parameters.parameters.requireds.map(&:name)
+          replacements = descendants(lambda_node.body).grep(Prism::LocalVariableReadNode).filter_map do |read|
+            replacement = "object" if read.name == parameters[0]
+            replacement ||= "context" if read.name == parameters[2]
+            next unless replacement
+
+            [read.location.start_offset - lambda_node.body.location.start_offset,
+             read.location.end_offset - lambda_node.body.location.start_offset, replacement]
+          end
+          replacements.sort_by(&:first).reverse_each { |from, to, replacement| body.bytesplice(from...to, replacement) }
+          rewriter.dedent(body)
+        end
+
+        def indent_body(body)
+          rewriter.indent(body).delete_suffix(rewriter.source_file.newline)
+        end
+
+        def descendants(node)
+          node.compact_child_nodes.flat_map { |child| [child, *descendants(child)] }
         end
       end
 

@@ -96,7 +96,7 @@ module GraphQL
       end
 
       def escape(value)
-        value.to_s.gsub("%", "%25").gsub("\r", "%0D").gsub("\n", "%0A").gsub(",", "%2C")
+        value.to_s.gsub("%", "%25").gsub("\r", "%0D").gsub("\n", "%0A").gsub(":", "%3A").gsub(",", "%2C")
       end
     end
   end

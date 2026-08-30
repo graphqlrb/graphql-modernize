@@ -8,7 +8,7 @@ the historical official upgrader, rubocop-graphql's cop list, and astel 0.2.0.
 | Rule | Upstream boundary | Static | Correction | Safety |
 |---|---:|---|---|---|
 | GQLM101 `.define` DSL | deprecated 1.10 | yes | guidance only | manual |
-| GQLM102 `resolve:` field option | removed 2.0.1 | yes | guidance only | manual |
+| GQLM102 `resolve:` field option | removed 2.0.1 | yes | simple lambda to method | unsafe/manual fallback |
 | GQLM103 `GraphQL::Function` | removed 2.0 | yes | superclass replacement | unsafe |
 | GQLM104 `to_graphql` / `graphql_definition` | deprecated 1.13 | yes | guidance only | manual |
 | GQLM105 `types.X` | class API migration | yes | remove `types.` | safe |

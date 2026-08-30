@@ -45,6 +45,17 @@ RSpec.describe GraphQL::Modernize::CLI do
 
   it "lists and explains registered rules" do
     expect(invoke("list")[1]).to include("GQLM106")
-    expect(invoke("explain", "GQLM106")[1]).to include("safety: safe")
+    Dir.mktmpdir do |root|
+      Dir.chdir(root) do
+        explanation = invoke("explain", "GQLM106")[1]
+        expect(explanation).to include("safety: safe", "# GQLM106")
+      end
+    end
+  end
+
+  it "returns exit 2 for invalid worker counts and output paths" do
+    expect(invoke("run", "--jobs", "0").then { |status, _out, error| [status, error] })
+      .to match([2, /jobs/])
+    expect(invoke("run", "--out", "/missing/directory/result.json").first).to eq(2)
   end
 end

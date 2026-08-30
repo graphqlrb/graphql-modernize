@@ -34,4 +34,46 @@ RSpec.describe GraphQL::Modernize::Application do
       expect(result.files.first.rewritten).to eq(result.files.first.source_file.source)
     end
   end
+
+  it "does not retain a stale unresolved offense after a later iteration resolves it" do
+    Dir.mktmpdir do |root|
+      path = File.join(root, "type.rb")
+      File.write(path, <<~RUBY)
+        class Type < Types::BaseObject
+          field :name, String, property: :name
+        end
+      RUBY
+      config = GraphQL::Modernize::Config.new(root: root)
+      result = described_class.new(
+        config: config,
+        rules: [GraphQL::Modernize::Rules::PropertyOption, GraphQL::Modernize::Rules::PropertyOption],
+        jobs: 1
+      ).run([path])
+
+      expect(result.files.first.offenses).to all(be_corrected)
+      expect(result.files.first.offenses.map(&:rule_id)).to eq(["GQLM106"])
+    end
+  end
+
+  it "reports reproducible diagnostics when a rewrite creates invalid syntax" do
+    bad_rule = Class.new(GraphQL::Modernize::Rules::Base) do
+      rule id: "GQLM998", safety: :safe, summary: "test invalid rewrite"
+      node_pattern :class_node, "(class_node)"
+
+      def on_match(node, _captures)
+        add_offense(node.superclass.location, message: "break syntax") do |rewriter|
+          rewriter.replace(node.superclass.location, "(")
+        end
+      end
+    end
+
+    Dir.mktmpdir do |root|
+      path = File.join(root, "type.rb")
+      File.write(path, "class Type < Types::BaseObject\nend\n")
+      config = GraphQL::Modernize::Config.new(root: root)
+
+      expect { described_class.new(config: config, rules: [bad_rule], jobs: 1).run([path]) }
+        .to raise_error(GraphQL::Modernize::Error, /type\.rb; rules=GQLM998; edits=.*issue/)
+    end
+  end
 end

@@ -55,14 +55,14 @@ module GraphQL
 
         attr_reader :rewriter, :config, :hierarchy
 
-        def add_offense(location, message:, &correction)
+        def add_offense(location, message:, safety: self.class.metadata.safety, &correction)
           return if @suppression&.suppressed?(self.class.metadata.id, location)
 
           offense = Offense.new(rule_id: self.class.metadata.id, location: location, message: message,
-                                safety: self.class.metadata.safety, path: rewriter.source_file.path,
+                                safety: safety, path: rewriter.source_file.path,
                                 correctable: !correction.nil?)
           @offenses << offense
-          return offense unless correction && correction_enabled?
+          return offense unless correction && correction_enabled?(safety)
 
           edit_count = rewriter.edits.length
           offense.corrected = rewriter.transaction(raise_on_conflict: true) { |rw| correction.call(rw) }
@@ -73,8 +73,7 @@ module GraphQL
           offense
         end
 
-        def correction_enabled?
-          safety = self.class.metadata.safety
+        def correction_enabled?(safety)
           safety == :safe || (safety == :unsafe && config.apply_unsafe)
         end
 
@@ -88,6 +87,15 @@ module GraphQL
 
         def inside?(node, *kinds)
           kinds.include?(graphql_kind(node))
+        end
+
+        def standalone_line?(node)
+          source = rewriter.source_file
+          line_start = source.line_start(node.location.start_offset)
+          line_end = source.line_end([node.location.end_offset - 1, node.location.start_offset].max)
+          before = source.source.byteslice(line_start, node.location.start_offset - line_start)
+          after = source.source.byteslice(node.location.end_offset, line_end - node.location.end_offset).lstrip
+          before.strip.empty? && (after.empty? || after.start_with?("#"))
         end
       end
     end

@@ -37,4 +37,28 @@ RSpec.describe GraphQL::Modernize::ClassHierarchy do
     expect(hierarchy.resolve_kind("ExternalType")).to eq(:object)
     expect(hierarchy.resolve_kind("Unknown")).to be_nil
   end
+
+  it "resolves custom base suffixes and inherits schema metadata" do
+    types = source(<<~RUBY)
+      class DatabaseObject
+      end
+
+      class ApplicationBaseObject
+      end
+
+      class BaseSchema < GraphQL::Schema
+        use GraphQL::Schema::Visibility
+        def inherited_resolver = true
+      end
+
+      class AppSchema < BaseSchema
+      end
+    RUBY
+    hierarchy = described_class.new.build([types])
+
+    expect(hierarchy.resolve_kind("DatabaseObject")).to be_nil
+    expect(hierarchy.resolve_kind("ApplicationBaseObject")).to eq(:object)
+    expect(hierarchy.visibility_plugin?("AppSchema")).to be(true)
+    expect(hierarchy.method_defined?("AppSchema", :inherited_resolver)).to be(true)
+  end
 end

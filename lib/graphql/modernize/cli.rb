@@ -7,6 +7,7 @@ module GraphQL
   module Modernize
     class CLI
       COMMANDS = %w[run list explain doctor version].freeze
+      PACKAGE_ROOT = File.expand_path("../../..", __dir__)
 
       def self.start(arguments = ARGV, out: $stdout, err: $stderr)
         new(arguments.dup, out: out, err: err).start
@@ -21,7 +22,7 @@ module GraphQL
       def start
         command = COMMANDS.include?(@arguments.first) ? @arguments.shift : "run"
         public_send(command)
-      rescue OptionParser::ParseError, Error, ArgumentError => e
+      rescue OptionParser::ParseError, Error, ArgumentError, Astel::Error, SystemCallError => e
         @err.puts("graphql-modernize: #{e.message}")
         2
       end
@@ -64,7 +65,7 @@ module GraphQL
         @out.puts("safety: #{metadata.safety}")
         @out.puts("since: #{metadata.since}") if metadata.since
         @out.puts("removed_in: #{metadata.removed_in}") if metadata.removed_in
-        docs = metadata.docs && File.expand_path(metadata.docs, Dir.pwd)
+        docs = metadata.docs && File.expand_path(metadata.docs, PACKAGE_ROOT)
         @out.puts("\n#{File.read(docs)}") if docs && File.file?(docs)
         0
       end
@@ -76,6 +77,7 @@ module GraphQL
         @out.puts("configuration: ok")
         @out.puts("ruby: #{RUBY_VERSION}")
         @out.puts("astel: #{Astel::VERSION}")
+        @out.puts("graphql: #{config.from_version || 'unknown'} -> #{config.target_version || 'unknown'}")
         @out.puts("files: #{files.length}")
         0
       end

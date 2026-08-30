@@ -45,6 +45,14 @@ RSpec.describe "safe migration rules" do
         "class AppSchema < GraphQL::Schema\n  query Types::Query\nend\n"
       )
     end
+
+    it "does not break a conditional #{plugin} call" do
+      code = "class AppSchema < GraphQL::Schema\n  use #{plugin} if enabled\nend\n"
+      offenses, rewriter = run_rule(rule, code)
+
+      expect(offenses).to be_empty
+      expect(rewriter.rewrite(validate: :parse)).to eq(code)
+    end
   end
 
   it "does not match unrelated DSLs, receivers, strings, comments, or heredocs" do

@@ -21,12 +21,15 @@ jobs:
           bundler-cache: true
       - run: git clone --depth 1 https://github.com/rmosolgo/graphql-ruby.git "$RUNNER_TEMP/graphql-ruby"
       - name: Apply safe rules
-        run: >-
-          bundle exec graphql-modernize run "$RUNNER_TEMP/graphql-ruby/lib" "$RUNNER_TEMP/graphql-ruby/spec"
-          --only GQLM105,GQLM106,GQLM107,GQLM205,GQLM301,GQLM302,GQLM303,GQLM305,GQLM306
-          --write --force --strict --jobs 2 --no-diff
+        run: |
+          bundle exec graphql-modernize run "$RUNNER_TEMP/graphql-ruby/lib" "$RUNNER_TEMP/graphql-ruby/spec" \
+            --only GQLM105,GQLM106,GQLM107,GQLM205,GQLM301,GQLM302,GQLM303,GQLM305,GQLM306 \
+            --write --force --strict --jobs 2 --no-diff
+          git -C "$RUNNER_TEMP/graphql-ruby" diff --binary > "$RUNNER_TEMP/first.diff"
       - name: Verify idempotence
-        run: >-
-          bundle exec graphql-modernize run "$RUNNER_TEMP/graphql-ruby/lib" "$RUNNER_TEMP/graphql-ruby/spec"
-          --only GQLM105,GQLM106,GQLM107,GQLM205,GQLM301,GQLM302,GQLM303,GQLM305,GQLM306
-          --write --force --strict --jobs 2 --no-diff
+        run: |
+          bundle exec graphql-modernize run "$RUNNER_TEMP/graphql-ruby/lib" "$RUNNER_TEMP/graphql-ruby/spec" \
+            --only GQLM105,GQLM106,GQLM107,GQLM205,GQLM301,GQLM302,GQLM303,GQLM305,GQLM306 \
+            --write --force --strict --jobs 2 --no-diff
+          git -C "$RUNNER_TEMP/graphql-ruby" diff --binary > "$RUNNER_TEMP/second.diff"
+          diff -u "$RUNNER_TEMP/first.diff" "$RUNNER_TEMP/second.diff"

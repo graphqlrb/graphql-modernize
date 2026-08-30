@@ -35,10 +35,39 @@ RSpec.describe "advanced migration rules" do
     end
   end
 
-  it "detects resolve options across proc shapes without false positives" do
+  it "converts a self-contained resolve lambda to a method before private" do
+    config = GraphQL::Modernize::Config.new(apply_unsafe: true)
+    before = <<~RUBY
+      class UserType < Types::BaseObject
+        field :posts, [PostType], null: false, resolve: ->(obj, _args, ctx) {
+          obj.posts.where(context: ctx)
+        }
+
+        private
+
+        def helper = true
+      end
+    RUBY
+    after = <<~RUBY
+      class UserType < Types::BaseObject
+        field :posts, [PostType], null: false
+
+        def posts
+          object.posts.where(context: context)
+        end
+
+        private
+
+        def helper = true
+      end
+    RUBY
+
+    expect_correction(GraphQL::Modernize::Rules::ResolveFieldOption, before, after, config: config)
+  end
+
+  it "downgrades resolve forms that cannot be converted without changing semantics" do
     detected = [
       "resolve: -> { 1 }",
-      "resolve: ->(obj, args, ctx) { obj }",
       "resolve: lambda { 1 }",
       "resolve: proc { 1 }",
       "resolve: method(:resolve_name)",
@@ -46,12 +75,19 @@ RSpec.describe "advanced migration rules" do
       "resolve: ->(*) { 1 }",
       "resolve: ->(_object, _arguments, _context) { external }",
       "resolve: -> do\n      1\n    end",
-      "resolve: ->(object, **) { object }"
+      "resolve: ->(object, **) { object }",
+      "resolve: ->(obj, args, ctx) { args[:id] }",
+      "resolve: ->(obj, args, ctx) { helper(obj) }",
+      "resolve: ->(obj, args, ctx) { obj.items.map { |item| item.id } }",
+      "resolve: ->(obj, args, ctx) { obj = obj.parent; obj.name }",
+      "resolve: ->(obj, args, ctx) { super() }",
+      "resolve: ->(obj, args, ctx) {\n      # keep this comment\n      obj.name\n    }"
     ]
     detected.each do |option|
       code = "class UserType < Types::BaseObject\n  field :name, String, #{option}\nend\n"
       offenses, rewriter = run_rule(GraphQL::Modernize::Rules::ResolveFieldOption, code)
       expect(offenses.map(&:rule_id)).to eq(["GQLM102"])
+      expect(offenses.first.safety).to eq(:manual)
       expect(rewriter.rewrite).to eq(code)
     end
 
@@ -73,7 +109,36 @@ RSpec.describe "advanced migration rules" do
     end
   end
 
-  it "adds Visibility after schema root configuration and remains idempotent" do
+  it "does not generate a resolver method that already exists" do
+    config = GraphQL::Modernize::Config.new(apply_unsafe: true)
+    code = <<~RUBY
+      class UserType < Types::BaseObject
+        field :name, String, resolve: ->(obj, _args, _ctx) { obj.name }
+
+        def name = object.name
+      end
+    RUBY
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::ResolveFieldOption, code, config: config)
+
+    expect(offenses.first.safety).to eq(:manual)
+    expect(rewriter.rewrite).to eq(code)
+  end
+
+  it "rewrites parameter references by byte offset in UTF-8 source" do
+    config = GraphQL::Modernize::Config.new(apply_unsafe: true)
+    before = <<~RUBY
+      class UserType < Types::BaseObject
+        field :label, String, resolve: ->(obj, _args, ctx) { "café: \#{obj.name} / \#{ctx[:locale]}" }
+      end
+    RUBY
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::ResolveFieldOption, before, config: config)
+    rewritten = rewriter.rewrite(validate: :parse)
+
+    expect(offenses.first).to be_corrected
+    expect(rewritten).to include("\"café: \#{object.name} / \#{context[:locale]}\"")
+  end
+
+  it "adds Visibility at the beginning of the schema and remains idempotent" do
     Dir.mktmpdir do |root|
       FileUtils.mkdir_p(File.join(root, "app/graphql"))
       schema = File.join(root, "app/graphql/schema.rb")
@@ -90,7 +155,7 @@ RSpec.describe "advanced migration rules" do
       result = application.run
       rewritten = result.files.find { |file| file.source_file.path == schema }.rewritten
 
-      expect(rewritten).to include("query Types::Query\n  use GraphQL::Schema::Visibility, migration_errors: true")
+      expect(rewritten).to include("use GraphQL::Schema::Visibility, migration_errors: true\n  query Types::Query")
       expect(result.files.flat_map(&:offenses).map(&:rule_id)).to eq(["GQLM307"])
     end
   end
@@ -108,6 +173,18 @@ RSpec.describe "advanced migration rules" do
     expect(first.map(&:rule_id)).to eq(["GQLM305"])
     expect(second.map(&:rule_id)).to eq(["GQLM306"])
     expect(second_rewriter.rewrite).to eq("class AppSchema < GraphQL::Schema\nend\n")
+  end
+
+  it "does not break a conditional pagination setting" do
+    code = <<~RUBY
+      class AppSchema < GraphQL::Schema
+        self.bidirectional_pagination = true if enabled
+      end
+    RUBY
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::BidirectionalPagination, code)
+
+    expect(offenses).to be_empty
+    expect(rewriter.rewrite(validate: :parse)).to eq(code)
   end
 
   it "keeps modernize rules opt-in" do

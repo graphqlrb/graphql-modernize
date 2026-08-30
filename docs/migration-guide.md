@@ -4,7 +4,8 @@
 
 1. Run `bundle exec graphql-modernize run` and review the proposed safe changes.
 2. Apply them with `--write`, then run the application's tests.
-3. Resolve GQLM101, GQLM102, GQLM104, and GQLM108 manually before updating.
+3. Run GQLM102 separately with `--unsafe`; resolve its manual fallbacks and
+   GQLM101, GQLM104, and GQLM108 before updating.
 4. Apply each unsafe superclass or Relay migration separately with
    `--only RULE --unsafe --write` and test it.
 5. Update graphql-ruby and rerun the tool with the target version.

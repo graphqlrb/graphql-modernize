@@ -29,4 +29,19 @@ RSpec.describe GraphQL::Modernize::Config do
       expect { described_class.load(root: root) }.to raise_error(GraphQL::Modernize::Error, /Unknown configuration/)
     end
   end
+
+  it "rejects malformed nested settings and versions" do
+    expect { described_class.new(base_classes: { object: "BaseObject" }) }
+      .to raise_error(GraphQL::Modernize::Error, /base_classes/)
+    expect { described_class.new(rules: { "GQLM401" => { "enabled" => "yes" } }) }
+      .to raise_error(GraphQL::Modernize::Error, /enabled/)
+    expect { described_class.new(target_version: "next") }
+      .to raise_error(GraphQL::Modernize::Error, /version/)
+    expect { described_class.new(base_classes: { typo: ["Base"] }) }
+      .to raise_error(GraphQL::Modernize::Error, /base_classes kind/)
+    expect { described_class.new(rules: { "GQLM9999" => {} }) }
+      .to raise_error(GraphQL::Modernize::Error, /rule ID/)
+    expect { described_class.new(from_version: "2.6", target_version: "2.5") }
+      .to raise_error(GraphQL::Modernize::Error, /from_version/)
+  end
 end

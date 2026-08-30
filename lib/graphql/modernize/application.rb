@@ -12,7 +12,8 @@ module GraphQL
       def initialize(config:, rules: RuleRegistry.all, jobs: Etc.nprocessors)
         @config = config
         @rules = rules
-        @jobs = [Integer(jobs), 1].max
+        @jobs = Integer(jobs)
+        raise Error, "jobs must be an integer greater than or equal to 1" unless @jobs.positive?
       end
 
       def run(paths = [])
@@ -22,7 +23,8 @@ module GraphQL
           [path, source_file.source]
         end
         current = originals.dup
-        offenses = Hash.new { |hash, path| hash[path] = {} }
+        corrected_offenses = Hash.new { |hash, path| hash[path] = [] }
+        current_offenses = Hash.new { |hash, path| hash[path] = [] }
         parse_errors = []
         iterations = 0
 
@@ -34,21 +36,29 @@ module GraphQL
           changed = false
 
           iteration_results.each do |path, rewritten, found|
-            found.each do |offense|
-              key = [offense.rule_id, offense.location.start_offset, offense.message]
-              offenses[path][key] ||= offense
-              offenses[path][key].corrected ||= offense.corrected?
-            end
+            current_offenses[path] = found
+            corrected_offenses[path].concat(found.select(&:corrected?))
             changed ||= current[path] != rewritten
             current[path] = rewritten
           end
           break unless changed
-          raise Error, "rewrites did not converge after #{@config.iterations} iterations" if iterations == @config.iterations
+
+          next unless iterations == @config.iterations
+
+          rule_ids = iteration_results.flat_map do |_path, _rewritten, found|
+            found.filter_map do |offense|
+              offense.rule_id if offense.corrected? || offense.conflicting_rule_id
+            end
+          end.uniq.sort
+          detail = rule_ids.empty? ? "" : " (related rules: #{rule_ids.join(', ')})"
+          raise Error, "rewrites did not converge after #{@config.iterations} iterations#{detail}"
         end
 
         results = originals.map do |path, source|
           source_file = Astel::SourceFile.from_string(source, path: path, version: @config.ruby_version)
-          FileResult.new(source_file: source_file, rewritten: current[path], offenses: offenses[path].values)
+          unresolved = current_offenses[path].reject(&:corrected?)
+          FileResult.new(source_file: source_file, rewritten: current[path],
+                         offenses: corrected_offenses[path] + unresolved)
         end
         Result.new(files: results, parse_errors: parse_errors.uniq, iterations: iterations)
       end
@@ -120,6 +130,18 @@ module GraphQL
         source_file = Astel::SourceFile.from_string(source, path: path, version: @config.ruby_version)
         found, rewriter = Runner.new(hierarchy: hierarchy, config: @config).run(source_file, @rules)
         [path, rewriter.rewrite(validate: :parse), found]
+      rescue Astel::Rewriter::ValidationError => e
+        rules = found ? found.select(&:corrected?).map(&:rule_id).uniq.sort : []
+        edits = if rewriter
+                  rewriter.edits.map do |edit|
+                    "#{edit.start_offset}...#{edit.end_offset}=#{edit.replacement.inspect}"
+                  end
+                else
+                  []
+                end
+        raise Error, "Rewritten source failed syntax validation: #{path}; rules=#{rules.join(',')}; " \
+                     "edits=[#{edits.join(', ')}]; errors=#{e.parse_errors.map(&:message).join(', ')}; " \
+                     "Please report an issue with reproduction details."
       end
     end
   end

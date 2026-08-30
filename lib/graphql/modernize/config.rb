@@ -7,6 +7,7 @@ module GraphQL
     class Config
       DEFAULT_INCLUDE = ["app/graphql/**/*.rb", "lib/graphql/**/*.rb"].freeze
       DEFAULT_EXCLUDE = ["vendor/**/*", "tmp/**/*"].freeze
+      BASE_CLASS_KINDS = %w[object input_object enum interface union resolver mutation subscription schema].freeze
       DEFAULTS = {
         "include" => DEFAULT_INCLUDE,
         "exclude" => DEFAULT_EXCLUDE,
@@ -44,18 +45,8 @@ module GraphQL
       def initialize(root: Dir.pwd, include_patterns: DEFAULT_INCLUDE, exclude_patterns: DEFAULT_EXCLUDE,
                      base_classes: {}, rules: {}, ruby_version: nil, apply_unsafe: false, from_version: nil,
                      target_version: nil, require_suppression_reason: false, iterations: 3)
-        unless iterations.is_a?(Integer) && iterations.positive?
-          raise Error, "iterations must be an integer greater than or equal to 1"
-        end
-        raise Error, "base_classes must be a mapping" unless base_classes.is_a?(Hash)
-        raise Error, "rules must be a mapping" unless rules.is_a?(Hash)
-        unless [true, false].include?(apply_unsafe) && [true, false].include?(require_suppression_reason)
-          raise Error, "Boolean settings must be true or false"
-        end
-        unless Array(include_patterns).all?(String) && Array(exclude_patterns).all?(String)
-          raise Error, "include and exclude must be arrays of strings"
-        end
-        raise Error, "Each rule configuration must be a mapping" unless rules.values.all?(Hash)
+        validate!(include_patterns, exclude_patterns, base_classes, rules, apply_unsafe,
+                  require_suppression_reason, iterations, from_version, target_version)
 
         @root = File.expand_path(root)
         @include_patterns = Array(include_patterns).freeze
@@ -65,9 +56,15 @@ module GraphQL
         @ruby_version = ruby_version
         @apply_unsafe = apply_unsafe
         @from_version = from_version || locked_graphql_version
-        @target_version = target_version
+        @target_version = target_version || locked_graphql_version
+        if @from_version && @target_version && Gem::Version.new(@from_version) > Gem::Version.new(@target_version)
+          raise Error, "from_version must be less than or equal to target_version"
+        end
+
         @require_suppression_reason = require_suppression_reason
         @iterations = iterations
+      rescue ArgumentError => e
+        raise Error, "Invalid version configuration: #{e.message}"
       end
 
       def rule_enabled?(metadata)
@@ -80,6 +77,42 @@ module GraphQL
       end
 
       private
+
+      def validate!(include_patterns, exclude_patterns, base_classes, rules, apply_unsafe,
+                    require_suppression_reason, iterations, from_version, target_version)
+        unless iterations.is_a?(Integer) && iterations.positive?
+          raise Error, "iterations must be an integer greater than or equal to 1"
+        end
+        raise Error, "base_classes must be a mapping" unless base_classes.is_a?(Hash)
+        raise Error, "rules must be a mapping" unless rules.is_a?(Hash)
+        unless [true, false].include?(apply_unsafe) && [true, false].include?(require_suppression_reason)
+          raise Error, "Boolean settings must be true or false"
+        end
+        unless include_patterns.is_a?(Array) && exclude_patterns.is_a?(Array) &&
+               include_patterns.all?(String) && exclude_patterns.all?(String)
+          raise Error, "include and exclude must be arrays of strings"
+        end
+        raise Error, "Each rule configuration must be a mapping" unless rules.values.all?(Hash)
+        unless base_classes.values.all? { |names| names.is_a?(Array) && names.all?(String) }
+          raise Error, "Each base_classes value must be an array of class-name strings"
+        end
+
+        unknown_kinds = base_classes.keys.map(&:to_s) - BASE_CLASS_KINDS
+        raise Error, "Unknown base_classes kinds: #{unknown_kinds.join(', ')}" unless unknown_kinds.empty?
+
+        known_rules = RuleRegistry.all.map { |rule| rule.metadata.id }
+        unknown_rules = rules.keys.map { |id| id.to_s.upcase } - known_rules
+        raise Error, "Unknown rule IDs: #{unknown_rules.join(', ')}" unless unknown_rules.empty?
+
+        unless rules.values.all? do |options|
+          key = options.key?("enabled") ? "enabled" : :enabled
+          !options.key?(key) || [true, false].include?(options[key])
+        end
+          raise Error, "A rule's enabled setting must be true or false"
+        end
+
+        [from_version, target_version].compact.each { |version| Gem::Version.new(version.to_s) }
+      end
 
       def locked_graphql_version
         lockfile = File.join(root, "Gemfile.lock")

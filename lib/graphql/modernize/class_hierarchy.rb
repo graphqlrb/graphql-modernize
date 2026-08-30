@@ -38,6 +38,7 @@ module GraphQL
         @interface_names = {}
         @visible_definitions = []
         @calls = Hash.new { |hash, name| hash[name] = [] }
+        @methods = Hash.new { |hash, name| hash[name] = {} }
       end
 
       def build(source_files)
@@ -63,7 +64,11 @@ module GraphQL
       end
 
       def calls_for(class_name)
-        @calls[normalize(class_name)]
+        ancestors(class_name).flat_map { |name| @calls[name] }
+      end
+
+      def method_defined?(class_name, method_name)
+        ancestors(class_name).any? { |name| @methods[name][method_name.to_sym] }
       end
 
       def visible_definitions
@@ -82,7 +87,7 @@ module GraphQL
         nodes = []
         includes = []
         calls = []
-        visible_methods = []
+        methods = []
         dispatcher = Astel::Dispatcher.new
         dispatcher.on(:class_node) { |node| nodes << [node, false] }
         dispatcher.on(:module_node) { |node| nodes << [node, true] }
@@ -91,7 +96,7 @@ module GraphQL
           includes << node if node.receiver.nil? && node.name == :include &&
                               node.arguments&.arguments&.any? { |arg| constant_name(arg) == "GraphQL::Schema::Interface" }
         end
-        dispatcher.on(:def_node) { |node| visible_methods << node if node.name == :visible? }
+        dispatcher.on(:def_node) { |node| methods << node }
         dispatcher.run(source_file.ast)
 
         name_cache = {}.compare_by_identity
@@ -117,10 +122,10 @@ module GraphQL
         end
         offset_map = entries.to_h { |entry| [entry.start_offset, entry] }
         @declarations[source_file.path] = offset_map
-        index_metadata(source_file, entries, includes, calls, visible_methods)
+        index_metadata(source_file, entries, includes, calls, methods)
       end
 
-      def index_metadata(source_file, entries, includes, calls, visible_methods)
+      def index_metadata(source_file, entries, includes, calls, methods)
         entries.each do |entry|
           @superclasses[entry.name] = entry.superclass if entry.superclass
         end
@@ -132,12 +137,15 @@ module GraphQL
           owner = owner_for(entries, call)
           @calls[owner.name] << Call.new(name: call.name, first_argument: first_argument(call)) if owner
         end
-        visible_methods.each do |node|
+        methods.each do |node|
           owner = owner_for(entries, node)
           next unless owner
 
-          @visible_definitions << Definition.new(class_name: owner.name, path: source_file.path,
-                                                 line: node.location.start_line)
+          @methods[owner.name][node.name] = true unless node.receiver
+          if node.name == :visible?
+            @visible_definitions << Definition.new(class_name: owner.name, path: source_file.path,
+                                                   line: node.location.start_line)
+          end
         end
       end
 
@@ -170,6 +178,18 @@ module GraphQL
       def direct_kind(name)
         DIRECT_KINDS[name] || @configured_kinds[name] || (@interface_names[name] && :interface) ||
           SUFFIX_KINDS.find { |suffix, _kind| name.end_with?(suffix) }&.last
+      end
+
+      def ancestors(class_name)
+        name = normalize(class_name)
+        result = []
+        seen = {}
+        until name.empty? || seen[name]
+          result << name
+          seen[name] = true
+          name = resolve_superclass(name)
+        end
+        result
       end
 
       def qualify(name, parent_name)
