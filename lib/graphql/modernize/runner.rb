@@ -12,14 +12,17 @@ module GraphQL
         context = ContextBuilder.new(source_file, @hierarchy)
         rewriter = Astel::Rewriter.new(source_file)
         dispatcher = Astel::Dispatcher.new
+        suppression = SuppressionIndex.new(source_file, require_reason: @config.require_suppression_reason)
         instances = rules.select { |rule| @config.rule_enabled?(rule.metadata) }
-                         .map { |rule| rule.new(context: context, rewriter: rewriter, config: @config) }
+                         .map do |rule|
+          rule.new(context: context, rewriter: rewriter, config: @config, suppression: suppression)
+        end
 
         instances.each do |rule|
           rule.class.node_types.each { |type| dispatcher.on(type) { |node| rule.visit(node) } }
         end
         dispatcher.run(source_file.ast)
-        [instances.flat_map(&:offenses), rewriter]
+        [instances.flat_map(&:offenses) + suppression.unused_offenses, rewriter]
       end
     end
   end

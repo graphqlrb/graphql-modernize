@@ -2,6 +2,7 @@ AllCops:
   NewCops: enable
   SuggestExtensions: false
   TargetRubyVersion: 3.3
+  UseCache: false
 
 Layout/LineLength:
   Max: 120
@@ -24,7 +25,7 @@ Metrics/MethodLength:
   Max: 50
 
 Metrics/ParameterLists:
-  Max: 8
+  Max: 12
 
 Metrics/PerceivedComplexity:
   Max: 30

@@ -32,10 +32,11 @@ module GraphQL
 
         attr_reader :offenses
 
-        def initialize(context:, rewriter:, config:)
+        def initialize(context:, rewriter:, config:, suppression: nil)
           @context = context
           @rewriter = rewriter
           @config = config
+          @suppression = suppression
           @offenses = []
         end
 
@@ -53,6 +54,8 @@ module GraphQL
         attr_reader :rewriter, :config
 
         def add_offense(location, message:, &correction)
+          return if @suppression&.suppressed?(self.class.metadata.id, location)
+
           offense = Offense.new(rule_id: self.class.metadata.id, location: location, message: message,
                                 safety: self.class.metadata.safety, path: rewriter.source_file.path,
                                 correctable: !correction.nil?)
