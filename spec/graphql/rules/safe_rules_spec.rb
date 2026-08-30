@@ -50,9 +50,43 @@ RSpec.describe "safe migration rules" do
       code = "class AppSchema < GraphQL::Schema\n  use #{plugin} if enabled\nend\n"
       offenses, rewriter = run_rule(rule, code)
 
-      expect(offenses).to be_empty
+      expect(offenses.map(&:safety)).to eq([:manual])
       expect(rewriter.rewrite(validate: :parse)).to eq(code)
     end
+
+    it "does not remove a #{plugin} call with a block" do
+      code = <<~RUBY
+        class AppSchema < GraphQL::Schema
+          use #{plugin} do
+            side_effect!
+          end
+        end
+      RUBY
+      offenses, rewriter = run_rule(rule, code)
+
+      expect(offenses.map(&:safety)).to eq([:manual])
+      expect(rewriter.rewrite(validate: :parse)).to eq(code)
+    end
+
+    it "does not silently ignore options on #{plugin}" do
+      code = "class AppSchema < GraphQL::Schema\n  use #{plugin}, custom: setup_plugin\nend\n"
+      offenses, rewriter = run_rule(rule, code)
+
+      expect(offenses.map(&:safety)).to eq([:manual])
+      expect(rewriter.rewrite(validate: :parse)).to eq(code)
+    end
+  end
+
+  it "does not discard side effects in removed field options" do
+    code = <<~RUBY
+      class UserType < Types::BaseObject
+        field :name, String, function: build_function!
+      end
+    RUBY
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::RemovedFieldOptions, code)
+
+    expect(offenses.map(&:safety)).to eq([:manual])
+    expect(rewriter.rewrite(validate: :parse)).to eq(code)
   end
 
   it "does not match unrelated DSLs, receivers, strings, comments, or heredocs" do

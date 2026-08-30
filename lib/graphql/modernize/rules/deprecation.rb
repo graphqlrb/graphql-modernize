@@ -8,8 +8,15 @@ module GraphQL
 
         def remove_plugin(node, constant)
           return unless inside?(node, :schema)
-          return unless node.arguments&.arguments&.one? && node.arguments.arguments.first.location.slice == constant
-          return unless standalone_line?(node)
+
+          arguments = node.arguments&.arguments
+          first_argument = arguments&.first
+          return unless first_argument && first_argument.location.slice == constant
+
+          if !arguments.one? || node.block || !standalone_line?(node)
+            return add_offense(node.location, safety: :manual,
+                                              message: "Remove `use #{constant}` manually and preserve side effects")
+          end
 
           add_offense(node.location, message: "Remove `use #{constant}` because it is now the default") do |rw|
             rw.remove_line(node)
@@ -73,10 +80,15 @@ module GraphQL
           return unless node.name == name
 
           receiver = node.receiver&.location&.slice
-          return unless inside?(node, :schema) || receiver&.start_with?("GraphQL::")
-          return unless standalone_line?(node)
+          return unless receiver == "GraphQL::Relay::ConnectionType"
 
           label = node.name.to_s.delete_suffix("=")
+          value = node.arguments&.arguments&.first
+          unless standalone_line?(node) && value && safe_to_discard?(value)
+            return add_offense(node.location, safety: :manual,
+                                              message: "Remove `#{label}` manually without discarding side effects")
+          end
+
           add_offense(node.location, message: "Remove the obsolete `#{label}` setting") { |rw| rw.remove_line(node) }
         end
       end
@@ -113,13 +125,13 @@ module GraphQL
         def on_match(node, _captures)
           context = context_for(node)
           return unless context&.graphql_kind == :schema
-          return if hierarchy.visible_definitions.empty? || hierarchy.visibility_plugin?(context.class_name)
+          return if hierarchy.visible_definitions.empty? || !hierarchy.visibility_plugin_target?(context.class_name)
 
           definition = hierarchy.visible_definitions.first
           message = "visible? (#{definition.path}:#{definition.line}) requires a Visibility plugin"
           migration_errors = config.rule_options(self.class.metadata.id).fetch("migration_errors", true)
           plugin = "use GraphQL::Schema::Visibility, migration_errors: #{migration_errors}"
-          add_offense(node.location, message: message) { |rw| rw.insert_into_body(node, plugin, position: :beginning) }
+          add_offense(node.location, message: message) { |rw| rw.insert_into_body(node, plugin, position: :end) }
         end
       end
 
@@ -131,7 +143,7 @@ module GraphQL
         def on_match(node, _captures)
           receiver = node.receiver&.location&.slice
           return unless %i[possible_types references_to].include?(node.name)
-          return unless (receiver == "self" && inside?(node, :schema)) || receiver&.end_with?("Schema")
+          return unless (receiver == "self" && inside?(node, :schema)) || hierarchy.resolve_kind(receiver) == :schema
 
           add_offense(node.location, message: "Return keys changed from type-name strings to type classes")
         end
@@ -157,9 +169,15 @@ module GraphQL
         def on_match(node, _captures)
           context = context_for(node)
           return unless context&.graphql_kind == :schema
-          return if hierarchy.calls_for(context.class_name).any? do |call|
+
+          configured = hierarchy.calls_for(context.class_name).any? do |call|
             call.name == :allow_legacy_invalid_empty_selections_on_union
           end
+          configured ||= %i[legacy_invalid_empty_selections_on_union
+                            legacy_invalid_empty_selections_on_union_with_type].any? do |name|
+            hierarchy.class_method_defined?(context.class_name, name)
+          end
+          return if configured
 
           add_offense(node.location, message: "Choose a policy for `allow_legacy_invalid_empty_selections_on_union`")
         end

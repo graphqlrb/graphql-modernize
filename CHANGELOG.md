@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Place Visibility after root schema configuration for GraphQL-Ruby 2.6.3+.
+- Preserve side effects in conditional or block-based removals and legacy
+  resolver lambdas that cannot be converted safely.
+- Reject unsafe output paths, invalid explicit inputs, and malformed
+  rule-specific configuration.
 - Convert self-contained legacy `resolve:` lambdas to resolver methods with an
   explicit unsafe opt-in and manual fallback for ambiguous code.
 - Tighten suppression scoping, inherited schema detection, configuration

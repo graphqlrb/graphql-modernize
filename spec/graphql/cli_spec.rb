@@ -57,5 +57,50 @@ RSpec.describe GraphQL::Modernize::CLI do
     expect(invoke("run", "--jobs", "0").then { |status, _out, error| [status, error] })
       .to match([2, /jobs/])
     expect(invoke("run", "--out", "/missing/directory/result.json").first).to eq(2)
+    expect(invoke("run", "--except", "GQLM9999").first).to eq(2)
+  end
+
+  it "never overwrites a source file with reporter output" do
+    Dir.mktmpdir do |root|
+      path = File.join(root, "type.rb")
+      source = "class Type < Types::BaseObject\n  field :name, String, property: :name\nend\n"
+      File.write(path, source)
+
+      Dir.chdir(root) do
+        status, _output, error = invoke("run", path, "--only", "GQLM106", "--write", "--force",
+                                        "--out", path, "--jobs", "1")
+        expect(status).to eq(2)
+        expect(error).to include("--out")
+        expect(File.read(path)).to eq(source)
+      end
+    end
+  end
+
+  it "runs a default-disabled rule when explicitly selected" do
+    Dir.mktmpdir do |root|
+      path = File.join(root, "type.rb")
+      File.write(path, <<~RUBY)
+        class Type < Types::BaseObject
+          argument :id, ID, required: true
+        end
+      RUBY
+
+      Dir.chdir(root) do
+        status, output, = invoke("run", path, "--only", "GQLM401", "--jobs", "1", "--no-diff")
+        expect(status).to eq(0)
+        expect(output).to include("GQLM401")
+      end
+    end
+  end
+
+  it "warns about parse errors in diff-oriented formats" do
+    Dir.mktmpdir do |root|
+      path = File.join(root, "broken.rb")
+      File.write(path, "class Broken <\n")
+
+      status, _output, error = invoke("run", path, "--format", "github", "--strict", "--jobs", "1")
+      expect(status).to eq(2)
+      expect(error).to include("parse error")
+    end
   end
 end

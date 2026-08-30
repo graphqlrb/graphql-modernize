@@ -15,6 +15,7 @@ module GraphQL
           configured = hierarchy.calls_for(context.class_name).any? do |call|
             call.name == :complexity_cost_calculation_mode
           end
+          configured ||= hierarchy.class_method_defined?(context.class_name, :complexity_cost_calculation_mode_for)
           return if configured
 
           add_offense(node.location, message: "Choose a migration policy for `complexity_cost_calculation_mode`")

@@ -33,6 +33,11 @@ the historical official upgrader, rubocop-graphql's cop list, and astel 0.2.0.
 The remaining catalog entries need application-specific intent or do not have a
 single generally correct rewrite, so they are reported as manual guidance.
 
+GraphQL-Ruby 2.6.3 requires `Schema::Visibility` to be attached after root type
+configuration, so GQLM307 appends the plugin. GraphQL-Ruby 2.5.15 added the
+type-aware `legacy_invalid_empty_selections_on_union_with_type` hook; GQLM310
+recognizes either legacy-selection hook as an explicit policy.
+
 ## Existing tools
 
 The removed official `GraphQL::Upgrader` targeted the `.define` to class API

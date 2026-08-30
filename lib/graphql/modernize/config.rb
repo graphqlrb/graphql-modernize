@@ -46,13 +46,13 @@ module GraphQL
                      base_classes: {}, rules: {}, ruby_version: nil, apply_unsafe: false, from_version: nil,
                      target_version: nil, require_suppression_reason: false, iterations: 3)
         validate!(include_patterns, exclude_patterns, base_classes, rules, apply_unsafe,
-                  require_suppression_reason, iterations, from_version, target_version)
+                  require_suppression_reason, iterations, ruby_version, from_version, target_version)
 
         @root = File.expand_path(root)
         @include_patterns = Array(include_patterns).freeze
         @exclude_patterns = Array(exclude_patterns).freeze
         @base_classes = base_classes.transform_keys(&:to_sym).transform_values { |names| Array(names) }.freeze
-        @rules = rules.to_h { |id, options| [id.to_s, options.transform_keys(&:to_s).freeze] }.freeze
+        @rules = rules.to_h { |id, options| [id.to_s.upcase, options.transform_keys(&:to_s).freeze] }.freeze
         @ruby_version = ruby_version
         @apply_unsafe = apply_unsafe
         @from_version = from_version || locked_graphql_version
@@ -79,7 +79,7 @@ module GraphQL
       private
 
       def validate!(include_patterns, exclude_patterns, base_classes, rules, apply_unsafe,
-                    require_suppression_reason, iterations, from_version, target_version)
+                    require_suppression_reason, iterations, ruby_version, from_version, target_version)
         unless iterations.is_a?(Integer) && iterations.positive?
           raise Error, "iterations must be an integer greater than or equal to 1"
         end
@@ -96,19 +96,48 @@ module GraphQL
         unless base_classes.values.all? { |names| names.is_a?(Array) && names.all?(String) }
           raise Error, "Each base_classes value must be an array of class-name strings"
         end
+        if base_classes.values.flatten.any? { |name| name.strip.empty? }
+          raise Error, "base_classes class names must not be empty"
+        end
 
         unknown_kinds = base_classes.keys.map(&:to_s) - BASE_CLASS_KINDS
         raise Error, "Unknown base_classes kinds: #{unknown_kinds.join(', ')}" unless unknown_kinds.empty?
 
+        validate_rules!(rules)
+        validate_versions!(ruby_version, from_version, target_version)
+      end
+
+      def validate_rules!(rules)
         known_rules = RuleRegistry.all.map { |rule| rule.metadata.id }
         unknown_rules = rules.keys.map { |id| id.to_s.upcase } - known_rules
         raise Error, "Unknown rule IDs: #{unknown_rules.join(', ')}" unless unknown_rules.empty?
 
-        unless rules.values.all? do |options|
+        rules.each do |id, options|
+          allowed = id.to_s.upcase == "GQLM307" ? %w[enabled migration_errors] : %w[enabled]
+          unknown_options = options.keys.map(&:to_s) - allowed
+          raise Error, "Unknown settings for #{id}: #{unknown_options.join(', ')}" unless unknown_options.empty?
+        end
+        validate_rule_values!(rules)
+      end
+
+      def validate_rule_values!(rules)
+        valid_enabled = rules.values.all? do |options|
           key = options.key?("enabled") ? "enabled" : :enabled
           !options.key?(key) || [true, false].include?(options[key])
         end
-          raise Error, "A rule's enabled setting must be true or false"
+        raise Error, "A rule's enabled setting must be true or false" unless valid_enabled
+
+        visibility_options = rules.find { |id, _options| id.to_s.upcase == "GQLM307" }&.last || {}
+        migration_errors = visibility_options.fetch("migration_errors",
+                                                    visibility_options.fetch(:migration_errors, true))
+        return if [true, false].include?(migration_errors)
+
+        raise Error, "GQLM307 migration_errors must be true or false"
+      end
+
+      def validate_versions!(ruby_version, from_version, target_version)
+        if ruby_version && !ruby_version.to_s.match?(/\A\d+\.\d+(?:\.\d+)?\z/)
+          raise Error, "ruby_version must use the X.Y format"
         end
 
         [from_version, target_version].compact.each { |version| Gem::Version.new(version.to_s) }

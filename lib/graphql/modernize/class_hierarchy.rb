@@ -34,17 +34,16 @@ module GraphQL
           Array(names).each { |name| result[normalize(name)] = kind.to_sym }
         end
         @declarations = {}
+        @declared_names = {}
         @superclasses = {}
         @interface_names = {}
         @visible_definitions = []
         @calls = Hash.new { |hash, name| hash[name] = [] }
         @methods = Hash.new { |hash, name| hash[name] = {} }
+        @class_methods = Hash.new { |hash, name| hash[name] = {} }
       end
 
-      def build(source_files)
-        source_files.each { |source_file| index(source_file) }
-        self
-      end
+      def build(source_files) = tap { source_files.each { |source_file| index(source_file) } }
 
       def resolve_kind(class_name)
         name = normalize(class_name)
@@ -59,25 +58,31 @@ module GraphQL
         nil
       end
 
-      def declaration_at(source_file, start_offset)
-        declarations.fetch(source_file.path, {})[start_offset]
-      end
+      def declaration_at(source_file, start_offset) = declarations.fetch(source_file.path, {})[start_offset]
 
-      def calls_for(class_name)
-        ancestors(class_name).flat_map { |name| @calls[name] }
-      end
+      def calls_for(class_name) = ancestors(class_name).flat_map { |name| @calls[name] }
 
       def method_defined?(class_name, method_name)
         ancestors(class_name).any? { |name| @methods[name][method_name.to_sym] }
       end
 
-      def visible_definitions
-        @visible_definitions.select { |definition| resolve_kind(definition.class_name) }
+      def class_method_defined?(class_name, method_name)
+        ancestors(class_name).any? { |name| @class_methods[name][method_name.to_sym] }
       end
+
+      def visible_definitions = @visible_definitions.select { |definition| resolve_kind(definition.class_name) }
 
       def visibility_plugin?(class_name)
         calls_for(class_name).any? do |call|
           call.name == :use && %w[GraphQL::Schema::Visibility GraphQL::Schema::Warden].include?(call.first_argument)
+        end
+      end
+
+      def visibility_plugin_target?(class_name)
+        return false if visibility_plugin?(class_name)
+
+        ancestors(class_name).drop(1).none? do |name|
+          @declared_names[name] && resolve_kind(name) == :schema && !visibility_plugin?(name)
         end
       end
 
@@ -88,6 +93,8 @@ module GraphQL
         includes = []
         calls = []
         methods = []
+        singleton_classes = []
+        scopes = []
         dispatcher = Astel::Dispatcher.new
         dispatcher.on(:class_node) { |node| nodes << [node, false] }
         dispatcher.on(:module_node) { |node| nodes << [node, true] }
@@ -96,7 +103,15 @@ module GraphQL
           includes << node if node.receiver.nil? && node.name == :include &&
                               node.arguments&.arguments&.any? { |arg| constant_name(arg) == "GraphQL::Schema::Interface" }
         end
-        dispatcher.on(:def_node) { |node| methods << node }
+        dispatcher.on(:def_node) do |node|
+          methods << node
+          scopes << node
+        end
+        dispatcher.on(:block_node) { |node| scopes << node }
+        dispatcher.on(:lambda_node) { |node| scopes << node }
+        dispatcher.on(:singleton_class_node) do |node|
+          singleton_classes << node if node.expression.is_a?(Prism::SelfNode)
+        end
         dispatcher.run(source_file.ast)
 
         name_cache = {}.compare_by_identity
@@ -122,18 +137,19 @@ module GraphQL
         end
         offset_map = entries.to_h { |entry| [entry.start_offset, entry] }
         @declarations[source_file.path] = offset_map
-        index_metadata(source_file, entries, includes, calls, methods)
+        index_metadata(source_file, entries, includes, calls, methods, singleton_classes, scopes)
       end
 
-      def index_metadata(source_file, entries, includes, calls, methods)
+      def index_metadata(source_file, entries, includes, calls, methods, singleton_classes, scopes)
         entries.each do |entry|
+          @declared_names[entry.name] = true
           @superclasses[entry.name] = entry.superclass if entry.superclass
         end
         includes.each do |call|
           owner = owner_for(entries, call)
           @interface_names[owner.name] = true if owner&.module_node
         end
-        calls.each do |call|
+        calls.reject { |call| scopes.any? { |scope| nested_in?(scope, call) } }.each do |call|
           owner = owner_for(entries, call)
           @calls[owner.name] << Call.new(name: call.name, first_argument: first_argument(call)) if owner
         end
@@ -141,7 +157,11 @@ module GraphQL
           owner = owner_for(entries, node)
           next unless owner
 
-          @methods[owner.name][node.name] = true unless node.receiver
+          inside_singleton = singleton_classes.any? { |scope| nested_in?(scope, node) }
+          next if node.receiver && !node.receiver.is_a?(Prism::SelfNode)
+
+          class_method = node.receiver.is_a?(Prism::SelfNode) || inside_singleton
+          (class_method ? @class_methods : @methods)[owner.name][node.name] = true
           if node.name == :visible?
             @visible_definitions << Definition.new(class_name: owner.name, path: source_file.path,
                                                    line: node.location.start_line)
@@ -168,6 +188,10 @@ module GraphQL
         entries.select do |entry|
           node.location.start_offset > entry.start_offset && node.location.end_offset < entry.end_offset
         end.min_by { |entry| entry.end_offset - entry.start_offset }
+      end
+
+      def nested_in?(scope, node)
+        node.location.start_offset > scope.location.start_offset && node.location.end_offset < scope.location.end_offset
       end
 
       def first_argument(call)

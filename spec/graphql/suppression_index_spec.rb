@@ -60,4 +60,20 @@ RSpec.describe GraphQL::Modernize::SuppressionIndex do
     expect(offenses.map(&:rule_id)).to eq(["GQLM106"])
     expect(rewriter.rewrite).to include("method: :name")
   end
+
+  it "does not require a reason on enable directives" do
+    config = GraphQL::Modernize::Config.new(require_suppression_reason: true)
+    code = <<~RUBY
+      class UserType < Types::BaseObject
+        # graphql-modernize:disable GQLM106 -- legacy field
+        field :one, String, property: :one
+        # graphql-modernize:enable GQLM106
+        field :two, String, property: :two
+      end
+    RUBY
+    offenses, rewriter = run_rule(rule, code, config: config)
+
+    expect(offenses.map(&:rule_id)).to eq(["GQLM106"])
+    expect(rewriter.rewrite).to include("property: :one", "method: :two")
+  end
 end

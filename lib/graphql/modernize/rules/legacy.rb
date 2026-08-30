@@ -18,12 +18,14 @@ module GraphQL
       end
 
       class ResolveFieldOption < Base
+        RESERVED_METHOD_NAMES = %i[context initialize object].freeze
         UNSUPPORTED_NODES = [
           Prism::BlockNode, Prism::LambdaNode, Prism::DefNode, Prism::ClassNode, Prism::ModuleNode,
           Prism::SelfNode, Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode,
           Prism::ClassVariableReadNode, Prism::ClassVariableWriteNode,
           Prism::GlobalVariableReadNode, Prism::GlobalVariableWriteNode,
-          Prism::SuperNode, Prism::ForwardingSuperNode, Prism::YieldNode
+          Prism::SuperNode, Prism::ForwardingSuperNode, Prism::YieldNode,
+          Prism::NextNode, Prism::BreakNode, Prism::RedoNode, Prism::RetryNode
         ].freeze
 
         rule id: "GQLM102", safety: :unsafe, summary: "Move `resolve:` field options to resolver methods",
@@ -52,7 +54,7 @@ module GraphQL
           @generated_method_names[method_name] = true
 
           body = resolver_body(lambda_node)
-          method_source = "def #{method_name}\n#{indent_body(body)}\nend"
+          method_source = "def #{method_name}(**)\n#{indent_body(body)}\nend"
           add_offense(argument.location, message: "Move `resolve:` to the `#{method_name}` method") do |rw|
             rw.remove_keyword_argument(node, :resolve)
             rw.insert_into_body(context_for(node).class_node, method_source, position: :before_private)
@@ -66,7 +68,7 @@ module GraphQL
           name = case field_name
                  when Prism::SymbolNode, Prism::StringNode then field_name.unescaped
                  end
-          name if name&.match?(/\A[a-z_]\w*[!?]?\z/)
+          name if name&.match?(/\A[a-z_]\w*[!?]?\z/) && !RESERVED_METHOD_NAMES.include?(name.to_sym)
         end
 
         def convertible?(field, lambda_node, method_name)
@@ -91,8 +93,10 @@ module GraphQL
         def safe_body?(body, names)
           nodes = descendants(body)
           return false if nodes.any? { |child| UNSUPPORTED_NODES.any? { |type| child.is_a?(type) } }
+
+          assignment_names = names.values_at(0, 2) + %i[object context]
           return false if nodes.any? do |child|
-            child.respond_to?(:name) && names.values_at(0, 2).include?(child.name) &&
+            child.respond_to?(:name) && assignment_names.include?(child.name) &&
             (child.is_a?(Prism::LocalVariableTargetNode) || child.class.name.end_with?("WriteNode"))
           end
           return false if nodes.grep(Prism::LocalVariableReadNode).any? { |read| read.depth.positive? }
@@ -225,6 +229,11 @@ module GraphQL
             argument.is_a?(Prism::AssocNode) && TARGETS.include?(argument.key.unescaped.to_sym)
           end
           return if arguments.empty?
+
+          unless arguments.all? { |argument| safe_to_discard?(argument.value) }
+            message = "Remove `field:` and `function:` manually; preserve side effects"
+            return add_offense(arguments.first.location, safety: :manual, message: message)
+          end
 
           add_offense(arguments.first.location, message: "Remove the deleted `field:` and `function:` options") do |rw|
             rw.remove_list_elements(keyword_hash, arguments)

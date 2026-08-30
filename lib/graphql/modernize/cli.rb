@@ -22,7 +22,7 @@ module GraphQL
       def start
         command = COMMANDS.include?(@arguments.first) ? @arguments.shift : "run"
         public_send(command)
-      rescue OptionParser::ParseError, Error, ArgumentError, Astel::Error, SystemCallError => e
+      rescue StandardError => e
         @err.puts("graphql-modernize: #{e.message}")
         2
       end
@@ -35,12 +35,19 @@ module GraphQL
 
         config = Config.load(root: Dir.pwd, overrides: config_overrides(options))
         rules = selected_rules(options, config)
-        application = Application.new(config: config, rules: rules, jobs: options[:jobs])
+        application = Application.new(config: config, rules: rules, jobs: options[:jobs],
+                                      explicit_rule_ids: options[:only] || [])
         application.ensure_write_safe!(force: options[:force]) if options[:write]
         result = application.run(paths)
-        application.write(result) if options[:write]
+        warn_parse_errors(result) unless %w[text json].include?(options[:format])
         output = Reporter.render(options[:format], result, diff: options[:diff])
-        options[:out] ? File.write(options[:out], output) : @out.write(output)
+        if options[:out]
+          ensure_output_is_not_source!(options[:out], result)
+          File.write(options[:out], output)
+        else
+          @out.write(output)
+        end
+        application.write(result) if options[:write]
         return 2 if options[:strict] && result.parse_errors.any?
 
         unresolved?(result, options[:fail_level]) ? 1 : 0
@@ -121,8 +128,8 @@ module GraphQL
       end
 
       def selected_rules(options, config)
-        rules = options[:only] ? options[:only].map { |id| RuleRegistry.fetch(id) } : RuleRegistry.all
-        excluded = Array(options[:except]).map(&:upcase)
+        rules = options[:only] ? options[:only].map { |id| RuleRegistry.fetch(id) }.uniq : RuleRegistry.all
+        excluded = Array(options[:except]).map { |id| RuleRegistry.fetch(id).metadata.id }
         rules = rules.reject { |rule| excluded.include?(rule.metadata.id) }
         return rules unless config.target_version
 
@@ -130,6 +137,21 @@ module GraphQL
         rules.select do |rule|
           boundary = rule.metadata.since || rule.metadata.removed_in
           !boundary || target >= Gem::Version.new(boundary)
+        end
+      end
+
+      def ensure_output_is_not_source!(output_path, result)
+        output = File.expand_path(output_path)
+        conflict = result.files.any? do |file|
+          source = File.expand_path(file.source_file.path)
+          output == source || (File.exist?(output) && File.identical?(output, source))
+        end
+        raise Error, "--out must differ from every input file" if conflict
+      end
+
+      def warn_parse_errors(result)
+        result.parse_errors.each do |path, errors|
+          @err.puts("#{path}: parse error: #{errors.join(', ')}")
         end
       end
 

@@ -52,6 +52,9 @@ RSpec.describe GraphQL::Modernize::ClassHierarchy do
       end
 
       class AppSchema < BaseSchema
+        def helper
+          use GraphQL::Schema::Warden
+        end
       end
     RUBY
     hierarchy = described_class.new.build([types])
@@ -60,5 +63,36 @@ RSpec.describe GraphQL::Modernize::ClassHierarchy do
     expect(hierarchy.resolve_kind("ApplicationBaseObject")).to eq(:object)
     expect(hierarchy.visibility_plugin?("AppSchema")).to be(true)
     expect(hierarchy.method_defined?("AppSchema", :inherited_resolver)).to be(true)
+    expect(hierarchy.class_method_defined?("AppSchema", :inherited_resolver)).to be(false)
+  end
+
+  it "does not treat DSL-shaped calls inside methods as schema configuration" do
+    types = source(<<~RUBY)
+      class AppSchema < GraphQL::Schema
+        def helper
+          use GraphQL::Schema::Visibility
+        end
+
+        def other.complexity_cost_calculation_mode_for(context) = :future
+      end
+    RUBY
+    hierarchy = described_class.new.build([types])
+
+    expect(hierarchy.visibility_plugin?("AppSchema")).to be(false)
+    expect(hierarchy.class_method_defined?("AppSchema", :complexity_cost_calculation_mode_for)).to be(false)
+  end
+
+  it "selects only the highest project schema for Visibility insertion" do
+    types = source(<<~RUBY)
+      class BaseSchema < GraphQL::Schema
+      end
+
+      class AppSchema < BaseSchema
+      end
+    RUBY
+    hierarchy = described_class.new.build([types])
+
+    expect(hierarchy.visibility_plugin_target?("BaseSchema")).to be(true)
+    expect(hierarchy.visibility_plugin_target?("AppSchema")).to be(false)
   end
 end

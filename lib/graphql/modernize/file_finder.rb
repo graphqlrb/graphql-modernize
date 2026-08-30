@@ -25,8 +25,14 @@ module GraphQL
       def explicit_files(paths)
         paths.flat_map do |path|
           absolute = File.expand_path(path, config.root)
-          File.directory?(absolute) ? Dir.glob(File.join(absolute, "**/*.rb")) : absolute
-        end.select { |path| File.file?(path) && path.end_with?(".rb") }
+          if File.directory?(absolute)
+            Dir.glob(File.join(absolute, "**/*.rb"))
+          elsif File.file?(absolute) && absolute.end_with?(".rb")
+            absolute
+          else
+            raise Error, "Input path does not exist or is not a Ruby file: #{path}"
+          end
+        end
       end
 
       def excluded?(path)

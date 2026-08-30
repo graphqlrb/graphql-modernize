@@ -1,4 +1,6 @@
 # GQLM306 — default nodes field
 
-Safety: safe. Removes the obsolete `default_nodes_field` assignment, which
-does not affect the current pagination implementation.
+Safety: safe. Removes the obsolete
+`GraphQL::Relay::ConnectionType.default_nodes_field` assignment, which
+does not affect the current pagination implementation. Conditional assignments
+and values that may have side effects are reported as manual.

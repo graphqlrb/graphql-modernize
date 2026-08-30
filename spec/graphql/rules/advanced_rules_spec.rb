@@ -52,7 +52,7 @@ RSpec.describe "advanced migration rules" do
       class UserType < Types::BaseObject
         field :posts, [PostType], null: false
 
-        def posts
+        def posts(**)
           object.posts.where(context: context)
         end
 
@@ -80,7 +80,10 @@ RSpec.describe "advanced migration rules" do
       "resolve: ->(obj, args, ctx) { helper(obj) }",
       "resolve: ->(obj, args, ctx) { obj.items.map { |item| item.id } }",
       "resolve: ->(obj, args, ctx) { obj = obj.parent; obj.name }",
+      "resolve: ->(obj, args, ctx) { object = obj.parent; ctx[object.id] }",
+      "resolve: ->(obj, args, ctx) { context = ctx.merge(admin: true); obj.name if context[:admin] }",
       "resolve: ->(obj, args, ctx) { super() }",
+      "resolve: ->(obj, args, ctx) { next obj.name }",
       "resolve: ->(obj, args, ctx) {\n      # keep this comment\n      obj.name\n    }"
     ]
     detected.each do |option|
@@ -88,6 +91,14 @@ RSpec.describe "advanced migration rules" do
       offenses, rewriter = run_rule(GraphQL::Modernize::Rules::ResolveFieldOption, code)
       expect(offenses.map(&:rule_id)).to eq(["GQLM102"])
       expect(offenses.first.safety).to eq(:manual)
+      expect(rewriter.rewrite).to eq(code)
+    end
+
+    %i[object context initialize].each do |field_name|
+      code = "class UserType < Types::BaseObject\n  field :#{field_name}, String, " \
+             "resolve: ->(obj, _args, _ctx) { obj.public_send(:#{field_name}) }\nend\n"
+      offenses, rewriter = run_rule(GraphQL::Modernize::Rules::ResolveFieldOption, code)
+      expect(offenses.map(&:safety)).to eq([:manual])
       expect(rewriter.rewrite).to eq(code)
     end
 
@@ -138,7 +149,7 @@ RSpec.describe "advanced migration rules" do
     expect(rewritten).to include("\"café: \#{object.name} / \#{context[:locale]}\"")
   end
 
-  it "adds Visibility at the beginning of the schema and remains idempotent" do
+  it "adds Visibility after schema configuration and remains idempotent" do
     Dir.mktmpdir do |root|
       FileUtils.mkdir_p(File.join(root, "app/graphql"))
       schema = File.join(root, "app/graphql/schema.rb")
@@ -155,36 +166,89 @@ RSpec.describe "advanced migration rules" do
       result = application.run
       rewritten = result.files.find { |file| file.source_file.path == schema }.rewritten
 
-      expect(rewritten).to include("use GraphQL::Schema::Visibility, migration_errors: true\n  query Types::Query")
+      expect(rewritten).to include("query Types::Query\n  use GraphQL::Schema::Visibility, migration_errors: true")
       expect(result.files.flat_map(&:offenses).map(&:rule_id)).to eq(["GQLM307"])
     end
   end
 
   it "removes each obsolete pagination setting" do
     code = <<~RUBY
-      class AppSchema < GraphQL::Schema
-        self.bidirectional_pagination = true
-        self.default_nodes_field = false
-      end
+      GraphQL::Relay::ConnectionType.bidirectional_pagination = true
+      GraphQL::Relay::ConnectionType.default_nodes_field = false
     RUBY
     first, first_rewriter = run_rule(GraphQL::Modernize::Rules::BidirectionalPagination, code)
     second, second_rewriter = run_rule(GraphQL::Modernize::Rules::DefaultNodesField, first_rewriter.rewrite)
 
     expect(first.map(&:rule_id)).to eq(["GQLM305"])
     expect(second.map(&:rule_id)).to eq(["GQLM306"])
-    expect(second_rewriter.rewrite).to eq("class AppSchema < GraphQL::Schema\nend\n")
+    expect(second_rewriter.rewrite).to eq("")
   end
 
   it "does not break a conditional pagination setting" do
     code = <<~RUBY
-      class AppSchema < GraphQL::Schema
-        self.bidirectional_pagination = true if enabled
-      end
+      GraphQL::Relay::ConnectionType.bidirectional_pagination = true if enabled
     RUBY
     offenses, rewriter = run_rule(GraphQL::Modernize::Rules::BidirectionalPagination, code)
 
-    expect(offenses).to be_empty
+    expect(offenses.map(&:safety)).to eq([:manual])
     expect(rewriter.rewrite(validate: :parse)).to eq(code)
+  end
+
+  it "does not remove a pagination setting whose value may have side effects" do
+    code = <<~RUBY
+      GraphQL::Relay::ConnectionType.bidirectional_pagination = compute_setting!
+    RUBY
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::BidirectionalPagination, code)
+
+    expect(offenses.map(&:safety)).to eq([:manual])
+    expect(rewriter.rewrite(validate: :parse)).to eq(code)
+  end
+
+  it "does not remove same-named application setters" do
+    code = <<~RUBY
+      class AppSchema < GraphQL::Schema
+        self.bidirectional_pagination = true
+        self.default_nodes_field = false
+      end
+      GraphQL::CustomConnection.bidirectional_pagination = true
+    RUBY
+
+    [GraphQL::Modernize::Rules::BidirectionalPagination,
+     GraphQL::Modernize::Rules::DefaultNodesField].each do |rule|
+      offenses, rewriter = run_rule(rule, code)
+      expect(offenses).to be_empty
+      expect(rewriter.rewrite).to eq(code)
+    end
+  end
+
+  it "recognizes method-based schema migration configurations" do
+    code = <<~RUBY
+      class AppSchema < GraphQL::Schema
+        class << self
+          def legacy_invalid_empty_selections_on_union_with_type(query, type) = nil
+        end
+
+        def self.complexity_cost_calculation_mode_for(context) = :future
+      end
+    RUBY
+    empty_union, = run_rule(GraphQL::Modernize::Rules::EmptyUnionSelections, code)
+    complexity, = run_rule(GraphQL::Modernize::Rules::ComplexityCostMode, code)
+
+    expect(empty_union).to be_empty
+    expect(complexity).to be_empty
+  end
+
+  it "only reports type index access on known schemas" do
+    code = <<~RUBY
+      class AppSchema < GraphQL::Schema
+      end
+      AppSchema.possible_types
+      FakeSchema.references_to
+    RUBY
+    offenses, = run_rule(GraphQL::Modernize::Rules::TypeIndexKeys, code)
+
+    expect(offenses.map(&:message)).to contain_exactly(/Return keys/)
+    expect(offenses.first.location.slice).to eq("AppSchema.possible_types")
   end
 
   it "keeps modernize rules opt-in" do

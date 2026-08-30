@@ -97,6 +97,10 @@ module GraphQL
           after = source.source.byteslice(node.location.end_offset, line_end - node.location.end_offset).lstrip
           before.strip.empty? && (after.empty? || after.start_with?("#"))
         end
+
+        def safe_to_discard?(node)
+          node.static_literal? || node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
+        end
       end
     end
   end

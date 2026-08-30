@@ -14,7 +14,7 @@ module GraphQL
           next unless match
 
           reason = match[:body].split("--", 2)[1]
-          next if require_reason && reason.to_s.strip.empty?
+          next if require_reason && match[:action] != "enable" && reason.to_s.strip.empty?
 
           ids = match[:body].split("--", 2).first.scan(/GQLM\d{3}/)
           line_start = source_file.line_start(comment.location.start_offset)

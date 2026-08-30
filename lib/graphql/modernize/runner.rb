@@ -3,9 +3,10 @@
 module GraphQL
   module Modernize
     class Runner
-      def initialize(hierarchy:, config: Config.new)
+      def initialize(hierarchy:, config: Config.new, explicit_rule_ids: [])
         @hierarchy = hierarchy
         @config = config
+        @explicit_rule_ids = explicit_rule_ids.map { |id| id.to_s.upcase }.freeze
       end
 
       def run(source_file, rules = RuleRegistry.all)
@@ -14,7 +15,9 @@ module GraphQL
         dispatcher = Astel::Dispatcher.new
         suppression = SuppressionIndex.new(source_file, require_reason: @config.require_suppression_reason)
         edit_rules = {}
-        instances = rules.select { |rule| @config.rule_enabled?(rule.metadata) }
+        instances = rules.select do |rule|
+          @explicit_rule_ids.include?(rule.metadata.id) || @config.rule_enabled?(rule.metadata)
+        end
                          .map do |rule|
           rule.new(context: context, rewriter: rewriter, config: @config, suppression: suppression,
                    hierarchy: @hierarchy, edit_rules: edit_rules)

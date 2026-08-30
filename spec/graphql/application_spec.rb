@@ -76,4 +76,32 @@ RSpec.describe GraphQL::Modernize::Application do
         .to raise_error(GraphQL::Modernize::Error, /type\.rb; rules=GQLM998; edits=.*issue/)
     end
   end
+
+  it "uses the configured rewrite rounds plus a convergence check" do
+    Dir.mktmpdir do |root|
+      path = File.join(root, "type.rb")
+      File.write(path, <<~RUBY)
+        class Type < Types::BaseObject
+          field :name, String, property: :name, field: LEGACY, null: true
+        end
+      RUBY
+      config = GraphQL::Modernize::Config.new(
+        root: root,
+        rules: { "GQLM402" => { "enabled" => true } },
+        iterations: 3
+      )
+      result = described_class.new(
+        config: config,
+        rules: [GraphQL::Modernize::Rules::PropertyOption,
+                GraphQL::Modernize::Rules::RemovedFieldOptions,
+                GraphQL::Modernize::Rules::RedundantNullTrue],
+        jobs: 1
+      ).run([path])
+
+      expect(result.iterations).to eq(4)
+      expect(result.files.first.rewritten).to include("field :name, String")
+      expect(result.files.first.rewritten).not_to include("property:", "field:", "null:")
+      expect(result.files.first.offenses).to all(be_corrected)
+    end
+  end
 end

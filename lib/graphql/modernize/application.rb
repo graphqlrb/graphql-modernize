@@ -9,9 +9,10 @@ module GraphQL
       FileResult = Data.define(:source_file, :rewritten, :offenses)
       Result = Data.define(:files, :parse_errors, :iterations)
 
-      def initialize(config:, rules: RuleRegistry.all, jobs: Etc.nprocessors)
+      def initialize(config:, rules: RuleRegistry.all, jobs: Etc.nprocessors, explicit_rule_ids: [])
         @config = config
         @rules = rules
+        @explicit_rule_ids = explicit_rule_ids.map { |id| id.to_s.upcase }.freeze
         @jobs = Integer(jobs)
         raise Error, "jobs must be an integer greater than or equal to 1" unless @jobs.positive?
       end
@@ -28,7 +29,7 @@ module GraphQL
         parse_errors = []
         iterations = 0
 
-        @config.iterations.times do |iteration|
+        (@config.iterations + 1).times do |iteration|
           iterations = iteration + 1
           source_files = parse_sources(current, parse_errors)
           hierarchy = ClassHierarchy.new(base_classes: @config.base_classes).build(source_files)
@@ -43,7 +44,7 @@ module GraphQL
           end
           break unless changed
 
-          next unless iterations == @config.iterations
+          next unless iterations > @config.iterations
 
           rule_ids = iteration_results.flat_map do |_path, _rewritten, found|
             found.filter_map do |offense|
@@ -128,7 +129,8 @@ module GraphQL
 
       def process_file(path, source, hierarchy)
         source_file = Astel::SourceFile.from_string(source, path: path, version: @config.ruby_version)
-        found, rewriter = Runner.new(hierarchy: hierarchy, config: @config).run(source_file, @rules)
+        found, rewriter = Runner.new(hierarchy: hierarchy, config: @config,
+                                     explicit_rule_ids: @explicit_rule_ids).run(source_file, @rules)
         [path, rewriter.rewrite(validate: :parse), found]
       rescue Astel::Rewriter::ValidationError => e
         rules = found ? found.select(&:corrected?).map(&:rule_id).uniq.sort : []
