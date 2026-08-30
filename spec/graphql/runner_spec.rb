@@ -52,4 +52,20 @@ RSpec.describe GraphQL::Modernize::Runner do
 
     expect(offenses).to be_empty
   end
+
+  it "reports the rule responsible for a conflicting edit" do
+    source = Astel::SourceFile.from_string(<<~RUBY, path: "type.rb")
+      class Types::UserType < Types::BaseObject
+        field :name, String, property: :full_name
+      end
+    RUBY
+    hierarchy = GraphQL::Modernize::ClassHierarchy.new.build([source])
+    offenses, = described_class.new(hierarchy: hierarchy).run(
+      source,
+      [GraphQL::Modernize::Rules::PropertyOption, GraphQL::Modernize::Rules::TestProperty]
+    )
+
+    expect(offenses.last.corrected?).to be(false)
+    expect(offenses.last.conflicting_rule_id).to eq("GQLM106")
+  end
 end

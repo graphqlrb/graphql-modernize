@@ -4,7 +4,7 @@ module GraphQL
   module Modernize
     class Offense
       attr_reader :rule_id, :location, :message, :safety, :path
-      attr_accessor :corrected
+      attr_accessor :corrected, :conflicting_rule_id
 
       def initialize(rule_id:, location:, message:, safety:, path:, correctable:)
         @rule_id = rule_id

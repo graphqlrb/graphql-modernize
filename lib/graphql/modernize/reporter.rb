@@ -27,8 +27,9 @@ module GraphQL
         output << "\n" unless output.empty?
         offense_output = offenses.map do |offense|
           status = offense.corrected? ? " corrected" : ""
+          conflict = offense.conflicting_rule_id ? " conflicts_with=#{offense.conflicting_rule_id}" : ""
           "#{offense.path}:#{offense.location.start_line}:#{offense.location.start_column + 1}: " \
-            "[#{offense.rule_id}]#{status} #{offense.message}"
+            "[#{offense.rule_id}]#{status}#{conflict} #{offense.message}"
         end.join("\n")
         output << offense_output
         output << "\n" unless output.empty?
@@ -84,7 +85,8 @@ module GraphQL
       def offense_payload(offense)
         { rule_id: offense.rule_id, path: offense.path, line: offense.location.start_line,
           column: offense.location.start_column + 1, message: offense.message, safety: offense.safety,
-          correctable: offense.correctable?, corrected: offense.corrected? }
+          correctable: offense.correctable?, corrected: offense.corrected?,
+          conflicting_rule_id: offense.conflicting_rule_id }
       end
 
       def relative_path(path)

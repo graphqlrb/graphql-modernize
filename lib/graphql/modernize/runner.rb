@@ -13,10 +13,11 @@ module GraphQL
         rewriter = Astel::Rewriter.new(source_file)
         dispatcher = Astel::Dispatcher.new
         suppression = SuppressionIndex.new(source_file, require_reason: @config.require_suppression_reason)
+        edit_rules = {}
         instances = rules.select { |rule| @config.rule_enabled?(rule.metadata) }
                          .map do |rule|
           rule.new(context: context, rewriter: rewriter, config: @config, suppression: suppression,
-                   hierarchy: @hierarchy)
+                   hierarchy: @hierarchy, edit_rules: edit_rules)
         end
 
         instances.each do |rule|

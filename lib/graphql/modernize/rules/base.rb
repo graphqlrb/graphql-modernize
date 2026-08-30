@@ -32,12 +32,13 @@ module GraphQL
 
         attr_reader :offenses
 
-        def initialize(context:, rewriter:, config:, suppression: nil, hierarchy: nil)
+        def initialize(context:, rewriter:, config:, suppression: nil, hierarchy: nil, edit_rules: {})
           @context = context
           @rewriter = rewriter
           @config = config
           @suppression = suppression
           @hierarchy = hierarchy
+          @edit_rules = edit_rules
           @offenses = []
         end
 
@@ -63,7 +64,12 @@ module GraphQL
           @offenses << offense
           return offense unless correction && correction_enabled?
 
-          offense.corrected = rewriter.transaction { |rw| correction.call(rw) }
+          edit_count = rewriter.edits.length
+          offense.corrected = rewriter.transaction(raise_on_conflict: true) { |rw| correction.call(rw) }
+          rewriter.edits.drop(edit_count).each { |edit| @edit_rules[edit] = self.class.metadata.id }
+          offense
+        rescue Astel::Rewriter::ConflictError => e
+          offense.conflicting_rule_id = @edit_rules.fetch(e.conflicting_edit, self.class.metadata.id)
           offense
         end
 
