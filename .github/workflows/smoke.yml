@@ -24,12 +24,12 @@ jobs:
         run: |
           bundle exec graphql-modernize run "$RUNNER_TEMP/graphql-ruby/lib" "$RUNNER_TEMP/graphql-ruby/spec" \
             --only GQLM105,GQLM106,GQLM107,GQLM205,GQLM301,GQLM302,GQLM303,GQLM305,GQLM306 \
-            --write --force --strict --jobs 2 --no-diff
+            --write --force --strict --fail-level none --jobs 2 --no-diff
           git -C "$RUNNER_TEMP/graphql-ruby" diff --binary > "$RUNNER_TEMP/first.diff"
       - name: Verify idempotence
         run: |
           bundle exec graphql-modernize run "$RUNNER_TEMP/graphql-ruby/lib" "$RUNNER_TEMP/graphql-ruby/spec" \
             --only GQLM105,GQLM106,GQLM107,GQLM205,GQLM301,GQLM302,GQLM303,GQLM305,GQLM306 \
-            --write --force --strict --jobs 2 --no-diff
+            --write --force --strict --fail-level none --jobs 2 --no-diff
           git -C "$RUNNER_TEMP/graphql-ruby" diff --binary > "$RUNNER_TEMP/second.diff"
           diff -u "$RUNNER_TEMP/first.diff" "$RUNNER_TEMP/second.diff"

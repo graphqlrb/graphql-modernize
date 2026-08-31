@@ -6,6 +6,8 @@
 
 <p align="center">
   <a href="https://github.com/ydah/graphql-modernize/actions/workflows/main.yml"><img src="https://github.com/ydah/graphql-modernize/actions/workflows/main.yml/badge.svg" alt="CI"></a>
+  <a href="https://rubygems.org/gems/graphql-modernize"><img src="https://img.shields.io/gem/v/graphql-modernize.svg" alt="Gem Version"></a>
+  <a href="https://rubygems.org/gems/graphql-modernize"><img src="https://img.shields.io/gem/dt/graphql-modernize.svg" alt="Downloads"></a>
   <img src="https://img.shields.io/badge/ruby-%3E%3D%203.3-ruby.svg" alt="Ruby 3.3 or newer">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License">
 </p>
