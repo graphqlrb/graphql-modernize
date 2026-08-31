@@ -82,7 +82,7 @@ RSpec.describe GraphQL::Modernize::Application do
       path = File.join(root, "type.rb")
       File.write(path, <<~RUBY)
         class Type < Types::BaseObject
-          field :name, String, property: :name, field: LEGACY, null: true
+          field :name, String, property: :name, field: nil, null: true
         end
       RUBY
       config = GraphQL::Modernize::Config.new(
@@ -111,7 +111,7 @@ RSpec.describe GraphQL::Modernize::Application do
       File.write(path, <<~RUBY)
         class Type < Types::BaseObject
           field :name, String, resolve: ->(obj, _args, _ctx) { obj.name },
-                property: :name, field: LEGACY, null: true
+                property: :name, field: nil, null: true
         end
       RUBY
       config = GraphQL::Modernize::Config.new(

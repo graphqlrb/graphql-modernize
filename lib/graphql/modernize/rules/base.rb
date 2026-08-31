@@ -87,7 +87,8 @@ module GraphQL
 
         def inside?(node, *kinds)
           context = context_for(node)
-          kinds.include?(context&.graphql_kind) && !ClassHierarchy::DIRECT_KINDS.key?(context.class_name)
+          kinds.include?(context&.graphql_kind) && !ClassHierarchy::DIRECT_KINDS.key?(context.class_name) &&
+            !@context.executable_scope_at?(node.location.start_offset)
         end
 
         def standalone_line?(node)
@@ -96,11 +97,11 @@ module GraphQL
           line_end = source.line_end([node.location.end_offset - 1, node.location.start_offset].max)
           before = source.source.byteslice(line_start, node.location.start_offset - line_start)
           after = source.source.byteslice(node.location.end_offset, line_end - node.location.end_offset).lstrip
-          before.strip.empty? && (after.empty? || after.start_with?("#"))
+          before.strip.empty? && after.empty?
         end
 
         def safe_to_discard?(node)
-          node.static_literal? || node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)
+          node.static_literal?
         end
 
         def constant_source(node)

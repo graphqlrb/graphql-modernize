@@ -211,6 +211,22 @@ RSpec.describe "advanced migration rules" do
     expect(rewriter.rewrite).to eq(code)
   end
 
+  it "does not infer visibility requirements from instance methods" do
+    code = <<~RUBY
+      class UserType < Types::BaseObject
+        def visible?(_context) = true
+      end
+
+      class AppSchema < GraphQL::Schema
+      end
+    RUBY
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::VisibilityPlugin, code,
+                                  config: GraphQL::Modernize::Config.new(apply_unsafe: true))
+
+    expect(offenses).to be_empty
+    expect(rewriter.rewrite).to eq(code)
+  end
+
   it "moves existing Visibility after root types without changing conditional setup" do
     config = GraphQL::Modernize::Config.new(apply_unsafe: true)
     before = <<~RUBY
@@ -266,6 +282,14 @@ RSpec.describe "advanced migration rules" do
       GraphQL::Relay::ConnectionType.bidirectional_pagination = true if enabled
     RUBY
     offenses, rewriter = run_rule(GraphQL::Modernize::Rules::BidirectionalPagination, code)
+
+    expect(offenses.map(&:safety)).to eq([:manual])
+    expect(rewriter.rewrite(validate: :parse)).to eq(code)
+  end
+
+  it "preserves pagination settings with trailing comments" do
+    code = "GraphQL::Relay::ConnectionType.default_nodes_field = false # keep rationale\n"
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::DefaultNodesField, code)
 
     expect(offenses.map(&:safety)).to eq([:manual])
     expect(rewriter.rewrite(validate: :parse)).to eq(code)

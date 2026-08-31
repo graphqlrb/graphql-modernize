@@ -195,6 +195,7 @@ module GraphQL
 
         def on_match(node, _captures)
           return unless inside?(node, :object, :input_object, :interface, :resolver, :mutation, :subscription)
+          return if node.block || node.arguments&.arguments&.any?
 
           name = node.message_loc.slice
           replacement = REPLACEMENTS[name]
@@ -217,6 +218,11 @@ module GraphQL
           argument = rewriter.find_keyword_argument(node, :property)
           return unless argument
 
+          if rewriter.find_keyword_argument(node, :method)
+            return add_offense(argument.location, safety: :manual,
+                                                  message: "Resolve existing `method:` and `property:` options manually")
+          end
+
           add_offense(argument.key.location, message: "Replace `property:` with `method:`") do |rw|
             rw.replace_keyword_key(argument, :method)
           end
@@ -237,7 +243,8 @@ module GraphQL
           return unless keyword_hash
 
           arguments = keyword_hash.elements.select do |argument|
-            argument.is_a?(Prism::AssocNode) && TARGETS.include?(argument.key.unescaped.to_sym)
+            argument.is_a?(Prism::AssocNode) && argument.key.is_a?(Prism::SymbolNode) &&
+              TARGETS.include?(argument.key.unescaped.to_sym)
           end
           return if arguments.empty?
 
@@ -247,7 +254,15 @@ module GraphQL
           end
 
           add_offense(arguments.first.location, message: "Remove the deleted `field:` and `function:` options") do |rw|
-            rw.remove_list_elements(keyword_hash, arguments)
+            if arguments.length == keyword_hash.elements.length
+              if node.arguments.arguments.one? && !node.opening_loc
+                rw.remove(node.message_loc.end_offset...keyword_hash.location.end_offset)
+              else
+                rw.remove_list_element(node.arguments, keyword_hash)
+              end
+            else
+              rw.remove_list_elements(keyword_hash, arguments)
+            end
           end
         end
       end

@@ -7,11 +7,20 @@ module GraphQL
     class ContextBuilder
       def initialize(source_file, hierarchy)
         nodes = {}
+        scopes = []
         dispatcher = Astel::Dispatcher.new
         callback = ->(node) { nodes[node.location.start_offset] = node }
         dispatcher.on(:class_node, callback)
         dispatcher.on(:module_node, callback)
+        dispatcher.on(:def_node) { |node| scopes << node }
+        dispatcher.on(:lambda_node) { |node| scopes << node }
+        dispatcher.on(:call_node) do |node|
+          scopes << node.block if node.block && (node.receiver || node.name != :field)
+        end
         dispatcher.run(source_file.ast)
+        @executable_scopes = scopes.map do |scope|
+          [scope.location.start_offset, scope.location.end_offset]
+        end.sort_by(&:first)
 
         @ranges = hierarchy.declarations.fetch(source_file.path, {}).values.map do |declaration|
           context = Context.new(
@@ -33,6 +42,15 @@ module GraphQL
           return context if byte_offset >= start_offset && byte_offset < end_offset
         end
         nil
+      end
+
+      def executable_scope_at?(byte_offset)
+        index = @executable_scopes.bsearch_index { |start_offset, _end_offset| start_offset >= byte_offset }
+        index = index ? index - 1 : @executable_scopes.length - 1
+        index.downto(0).any? do |candidate|
+          start_offset, end_offset = @executable_scopes[candidate]
+          byte_offset > start_offset && byte_offset < end_offset
+        end
       end
     end
   end

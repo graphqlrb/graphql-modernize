@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Keep safe rewrites out of methods, lambdas, and unrelated blocks; preserve
+  constant evaluation, trailing comments, call arguments, and existing options.
+- Detect Visibility requirements only from class-level `visible?` hooks.
 - Correct all five legacy scalar mappings and ignore unknown `types.X` calls.
 - Move existing Visibility setup below root types and exclude graphql-ruby's
   framework base classes from application migrations.

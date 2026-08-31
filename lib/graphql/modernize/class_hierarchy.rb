@@ -58,8 +58,6 @@ module GraphQL
         nil
       end
 
-      def declaration_at(source_file, start_offset) = declarations.fetch(source_file.path, {})[start_offset]
-
       def calls_for(class_name) = ancestors(class_name).flat_map { |name| @calls[name] }
 
       def method_defined?(class_name, method_name) = defined_in?(@methods, class_name, method_name)
@@ -163,6 +161,8 @@ module GraphQL
           end
         end
         methods.each do |node|
+          next if scopes.any? { |scope| !scope.equal?(node) && nested_in?(scope, node) }
+
           owner = owner_for(entries, node)
           next unless owner
 
@@ -171,7 +171,7 @@ module GraphQL
 
           class_method = node.receiver.is_a?(Prism::SelfNode) || inside_singleton
           (class_method ? @class_methods : @methods)[owner.name][node.name] = true
-          if node.name == :visible?
+          if class_method && node.name == :visible?
             @visible_definitions << Definition.new(class_name: owner.name, path: source_file.path,
                                                    line: node.location.start_line)
           end

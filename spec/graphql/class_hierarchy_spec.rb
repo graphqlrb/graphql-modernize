@@ -90,6 +90,21 @@ RSpec.describe GraphQL::Modernize::ClassHierarchy do
     expect(hierarchy.resolve_kind("DeferredInterface")).to be_nil
   end
 
+  it "only indexes class-level visibility hooks" do
+    types = source(<<~RUBY)
+      class UserType < Types::BaseObject
+        def visible?(_context) = true
+
+        def installer
+          def self.visible?(_context) = true
+        end
+      end
+    RUBY
+    hierarchy = described_class.new.build([types])
+
+    expect(hierarchy.visible_definitions).to be_empty
+  end
+
   it "selects only the highest project schema for Visibility insertion" do
     types = source(<<~RUBY)
       class BaseSchema < GraphQL::Schema

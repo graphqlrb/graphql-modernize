@@ -32,6 +32,19 @@ RSpec.describe "safe migration rules" do
     expect_correction(GraphQL::Modernize::Rules::TypesShortcut, before, after)
   end
 
+  it "does not discard arguments or blocks from types shortcuts" do
+    code = <<~RUBY
+      class UserType < Types::BaseObject
+        field :one, types.Int(side_effect!)
+        field :two, types.Int { side_effect! }
+      end
+    RUBY
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::TypesShortcut, code)
+
+    expect(offenses).to be_empty
+    expect(rewriter.rewrite).to eq(code)
+  end
+
   it "renames property without changing formatting" do
     expect_correction(
       GraphQL::Modernize::Rules::PropertyOption,
@@ -40,12 +53,82 @@ RSpec.describe "safe migration rules" do
     )
   end
 
+  it "does not create duplicate method keywords" do
+    code = <<~RUBY
+      class UserType < Types::BaseObject
+        field :name, String, property: :legacy, method: :current
+      end
+    RUBY
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::PropertyOption, code)
+
+    expect(offenses.map(&:safety)).to eq([:manual])
+    expect(rewriter.rewrite).to eq(code)
+  end
+
   it "removes field and function options together" do
     expect_correction(
       GraphQL::Modernize::Rules::RemovedFieldOptions,
-      "class UserType < Types::BaseObject\n  field :name, String, field: OLD, function: FN, null: false\nend\n",
-      "class UserType < Types::BaseObject\n  field :name, String, null: false\nend\n"
+      "class UserType < Types::BaseObject\n  field :name, String, field: nil, function: false\nend\n",
+      "class UserType < Types::BaseObject\n  field :name, String\nend\n"
     )
+    expect_correction(
+      GraphQL::Modernize::Rules::RemovedFieldOptions,
+      "class UserType < Types::BaseObject\n  field(:name, String, field: nil, function: false)\nend\n",
+      "class UserType < Types::BaseObject\n  field(:name, String)\nend\n"
+    )
+  end
+
+  it "does not discard constant evaluation or string-keyed hashes" do
+    code = <<~RUBY
+      class UserType < Types::BaseObject
+        field :one, String, field: LEGACY
+        field :two, String, "field" => 1
+      end
+    RUBY
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::RemovedFieldOptions, code)
+
+    expect(offenses.map(&:safety)).to eq([:manual])
+    expect(rewriter.rewrite).to eq(code)
+  end
+
+  it "does not rewrite DSL-shaped calls inside executable scopes" do
+    code = <<~RUBY
+      class UserType < Types::BaseObject
+        def helper
+          field :name, String, property: :name
+        end
+
+        HANDLER = -> { field :other, String, property: :other }
+        OTHER_HANDLER = proc { field :third, String, property: :third }
+      end
+
+      class AppSchema < GraphQL::Schema
+        def helper
+          error_bubbling(true)
+        end
+      end
+    RUBY
+
+    [GraphQL::Modernize::Rules::PropertyOption, GraphQL::Modernize::Rules::ErrorBubbling].each do |rule|
+      offenses, rewriter = run_rule(rule, code)
+      expect(offenses).to be_empty
+      expect(rewriter.rewrite).to eq(code)
+    end
+  end
+
+  it "still rewrites declarations inside field blocks" do
+    code = <<~RUBY
+      class UserType < Types::BaseObject
+        field :search do
+          argument :query, String, required: true
+        end
+      end
+    RUBY
+    config = GraphQL::Modernize::Config.new(rules: { "GQLM401" => { "enabled" => true } })
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::RedundantRequiredTrue, code, config: config)
+
+    expect(offenses.map(&:rule_id)).to eq(["GQLM401"])
+    expect(rewriter.rewrite(validate: :parse)).not_to include("required: true")
   end
 
   it "renames the load application object error constant" do
@@ -103,6 +186,14 @@ RSpec.describe "safe migration rules" do
 
     it "does not silently ignore options on #{plugin}" do
       code = "class AppSchema < GraphQL::Schema\n  use #{plugin}, custom: setup_plugin\nend\n"
+      offenses, rewriter = run_rule(rule, code)
+
+      expect(offenses.map(&:safety)).to eq([:manual])
+      expect(rewriter.rewrite(validate: :parse)).to eq(code)
+    end
+
+    it "preserves a trailing comment on #{plugin}" do
+      code = "class AppSchema < GraphQL::Schema\n  use #{plugin} # keep rationale\nend\n"
       offenses, rewriter = run_rule(rule, code)
 
       expect(offenses.map(&:safety)).to eq([:manual])
