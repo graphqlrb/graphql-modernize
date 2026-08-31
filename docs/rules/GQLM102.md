@@ -6,4 +6,6 @@ moved to an instance resolver method and legacy `obj` / `ctx` references become
 arguments, matching a legacy proc that did not read `args`. Captured locals,
 `args`, nested blocks, bare calls,
 dynamic field names, and method-name collisions are reported as manual because
-an automatic rewrite could change their meaning.
+an automatic rewrite could change their meaning. Duplicate `resolve:` options
+and calls containing dynamic keyword expansion (`**options`) are also left
+unchanged for manual resolution.

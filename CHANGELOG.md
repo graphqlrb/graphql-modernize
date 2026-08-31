@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Stop safely on Git inspection failures and unsafe write targets, ignore
+  receiver-shaped schema calls, and preserve chained type wrappers, dynamic
+  keyword expansions, and duplicate legacy options for review.
 - Keep safe rewrites out of methods, lambdas, and unrelated blocks; preserve
   constant evaluation, trailing comments, call arguments, and existing options.
 - Detect Visibility requirements only from class-level `visible?` hooks.

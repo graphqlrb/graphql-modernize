@@ -64,14 +64,36 @@ module GraphQL
         Result.new(files: results, parse_errors: parse_errors.uniq, iterations: iterations)
       end
 
-      def ensure_write_safe!(force: false)
+      def ensure_write_safe!(paths: [], force: false)
         return if force
 
-        _output, _error, status = Open3.capture3("git", "-C", @config.root, "rev-parse", "--is-inside-work-tree")
-        raise Error, "--write must run inside a Git working tree (use --force to override)" unless status.success?
+        output, _error, status = Open3.capture3("git", "-C", @config.root, "rev-parse", "--is-inside-work-tree")
+        unless status.success? && output.strip == "true"
+          raise Error, "--write must run inside a Git working tree (use --force to override)"
+        end
 
-        output, = Open3.capture2("git", "-C", @config.root, "status", "--porcelain")
+        output, error, status = Open3.capture3("git", "-C", @config.root, "status", "--porcelain")
+        raise Error, "Unable to inspect the Git working tree: #{error.strip}" unless status.success?
+
         raise Error, "The working tree is not clean (use --force to override)" unless output.empty?
+
+        output, error, status = Open3.capture3("git", "-C", @config.root, "rev-parse", "--show-toplevel")
+        raise Error, "Unable to determine the Git working tree root: #{error.strip}" unless status.success?
+
+        root = File.realpath(output.strip)
+        prefix = "#{root}#{File::SEPARATOR}"
+        files = FileFinder.new(@config).find(paths)
+        unsafe = files.find do |path|
+          !File.realpath(path).start_with?(prefix) || File.lstat(path).symlink?
+        end
+        raise Error, "A --write target is outside the Git working tree or is a symbolic link: #{unsafe}" if unsafe
+
+        output, error, status = Open3.capture3("git", "-C", root, "ls-files", "-z")
+        raise Error, "Unable to inspect Git-tracked files: #{error.strip}" unless status.success?
+
+        tracked = output.split("\0").to_h { |path| [File.join(root, path), true] }
+        untracked = files.find { |path| !tracked[File.realpath(path)] }
+        raise Error, "A --write target is not tracked by Git: #{untracked}" if untracked
       end
 
       def write(result)

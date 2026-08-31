@@ -103,7 +103,7 @@ module GraphQL
         dispatcher.on(:class_node) { |node| nodes << [node, false] }
         dispatcher.on(:module_node) { |node| nodes << [node, true] }
         dispatcher.on(:call_node) do |node|
-          calls << node
+          calls << node if node.receiver.nil?
           includes << node if node.receiver.nil? && node.name == :include &&
                               node.arguments&.arguments&.any? { |arg| constant_name(arg) == "GraphQL::Schema::Interface" }
         end

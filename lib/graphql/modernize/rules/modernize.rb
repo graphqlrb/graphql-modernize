@@ -11,8 +11,22 @@ module GraphQL
         def on_match(node, _captures)
           return unless inside?(node, :object, :input_object, :interface, :resolver, :mutation, :subscription)
 
-          argument = rewriter.find_keyword_argument(node, :required)
-          return unless argument&.value.is_a?(Prism::TrueNode)
+          arguments = keyword_arguments(node, :required)
+          return if arguments.empty?
+
+          if arguments.length > 1
+            return unless arguments.any? { |argument| argument.value.is_a?(Prism::TrueNode) }
+
+            return add_offense(arguments.first.location, safety: :manual,
+                                                         message: "Resolve duplicate `required:` options manually")
+          end
+          return unless arguments.first.value.is_a?(Prism::TrueNode)
+
+          argument = arguments.first
+          if dynamic_keyword_arguments?(node)
+            return add_offense(argument.location, safety: :manual,
+                                                  message: "Review `**` before removing `required: true` manually")
+          end
 
           add_offense(argument.location, message: "Remove the default `required: true` option") do |rw|
             rw.remove_keyword_argument(node, :required)
@@ -28,8 +42,22 @@ module GraphQL
         def on_match(node, _captures)
           return unless inside?(node, :object, :interface)
 
-          argument = rewriter.find_keyword_argument(node, :null)
-          return unless argument&.value.is_a?(Prism::TrueNode)
+          arguments = keyword_arguments(node, :null)
+          return if arguments.empty?
+
+          if arguments.length > 1
+            return unless arguments.any? { |argument| argument.value.is_a?(Prism::TrueNode) }
+
+            return add_offense(arguments.first.location, safety: :manual,
+                                                         message: "Resolve duplicate `null:` options manually")
+          end
+          return unless arguments.first.value.is_a?(Prism::TrueNode)
+
+          argument = arguments.first
+          if dynamic_keyword_arguments?(node)
+            return add_offense(argument.location, safety: :manual,
+                                                  message: "Review `**` expansion and resolve `null: true` manually")
+          end
 
           add_offense(argument.location, message: "Remove the default `null: true` option") do |rw|
             rw.remove_keyword_argument(node, :null)

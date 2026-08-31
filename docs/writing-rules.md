@@ -11,8 +11,10 @@ class PropertyOption < Base
   def on_match(node, _captures)
     return unless inside?(node, :object, :interface)
 
-    argument = rewriter.find_keyword_argument(node, :property)
-    return unless argument
+    arguments = keyword_arguments(node, :property)
+    return unless arguments.one? && !dynamic_keyword_arguments?(node)
+
+    argument = arguments.first
 
     add_offense(argument.location, message: "replace property") do |rw|
       rw.replace_keyword_key(argument, :method)

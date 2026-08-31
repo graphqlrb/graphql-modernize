@@ -35,8 +35,14 @@ module GraphQL
         def on_match(node, _captures)
           return unless inside?(node, :object, :interface)
 
-          argument = rewriter.find_keyword_argument(node, :resolve)
-          return unless argument
+          arguments = keyword_arguments(node, :resolve)
+          return if arguments.empty?
+
+          argument = arguments.first
+          if arguments.length > 1
+            return add_offense(argument.location, safety: :manual,
+                                                  message: "Resolve duplicate `resolve:` options manually")
+          end
 
           method_name = field_method_name(node)
           lambda_node = argument.value
@@ -74,6 +80,7 @@ module GraphQL
         def convertible?(field, lambda_node, method_name)
           return false unless method_name && lambda_node.is_a?(Prism::LambdaNode) && lambda_node.body
           return false unless body_boundaries_are_whitespace?(lambda_node)
+          return false if dynamic_keyword_arguments?(field)
           return false if %i[method resolver_method hash_key].any? do |name|
             rewriter.find_keyword_argument(field, name)
           end
@@ -201,6 +208,11 @@ module GraphQL
           replacement = REPLACEMENTS[name]
           return unless replacement
 
+          if @context.call_receiver?(node)
+            return add_offense(node.location, safety: :manual,
+                                              message: "Migrate chained `types.#{name}` to the class API manually")
+          end
+
           add_offense(node.location, message: "Replace `types.#{name}` with `#{replacement}`") do |rw|
             rw.replace(node.location, replacement)
           end
@@ -215,12 +227,14 @@ module GraphQL
         def on_match(node, _captures)
           return unless inside?(node, :object, :interface)
 
-          argument = rewriter.find_keyword_argument(node, :property)
-          return unless argument
+          arguments = keyword_arguments(node, :property)
+          return if arguments.empty?
 
-          if rewriter.find_keyword_argument(node, :method)
+          argument = arguments.first
+
+          if arguments.length > 1 || keyword_arguments(node, :method).any? || dynamic_keyword_arguments?(node)
             return add_offense(argument.location, safety: :manual,
-                                                  message: "Resolve existing `method:` and `property:` options manually")
+                                                  message: "Resolve duplicate `property:` and `method:` manually")
           end
 
           add_offense(argument.key.location, message: "Replace `property:` with `method:`") do |rw|
@@ -248,7 +262,7 @@ module GraphQL
           end
           return if arguments.empty?
 
-          unless arguments.all? { |argument| safe_to_discard?(argument.value) }
+          unless arguments.all? { |argument| safe_to_discard?(argument.value) } && !dynamic_keyword_arguments?(node)
             message = "Remove `field:` and `function:` manually; preserve side effects"
             return add_offense(arguments.first.location, safety: :manual, message: message)
           end

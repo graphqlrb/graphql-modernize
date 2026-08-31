@@ -45,6 +45,18 @@ RSpec.describe "safe migration rules" do
     expect(rewriter.rewrite).to eq(code)
   end
 
+  it "does not break chained legacy type wrappers" do
+    code = <<~RUBY
+      class UserType < Types::BaseObject
+        field :name, types.String.to_non_null_type
+      end
+    RUBY
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::TypesShortcut, code)
+
+    expect(offenses.map(&:safety)).to eq([:manual])
+    expect(rewriter.rewrite).to eq(code)
+  end
+
   it "renames property without changing formatting" do
     expect_correction(
       GraphQL::Modernize::Rules::PropertyOption,
@@ -57,11 +69,13 @@ RSpec.describe "safe migration rules" do
     code = <<~RUBY
       class UserType < Types::BaseObject
         field :name, String, property: :legacy, method: :current
+        field :other, String, property: :first, property: :second
+        field :dynamic, String, **options, property: :legacy
       end
     RUBY
     offenses, rewriter = run_rule(GraphQL::Modernize::Rules::PropertyOption, code)
 
-    expect(offenses.map(&:safety)).to eq([:manual])
+    expect(offenses.map(&:safety)).to eq(%i[manual manual manual])
     expect(rewriter.rewrite).to eq(code)
   end
 
@@ -83,12 +97,37 @@ RSpec.describe "safe migration rules" do
       class UserType < Types::BaseObject
         field :one, String, field: LEGACY
         field :two, String, "field" => 1
+        field :three, String, **options, field: nil
       end
     RUBY
     offenses, rewriter = run_rule(GraphQL::Modernize::Rules::RemovedFieldOptions, code)
 
-    expect(offenses.map(&:safety)).to eq([:manual])
+    expect(offenses.map(&:safety)).to eq(%i[manual manual])
     expect(rewriter.rewrite).to eq(code)
+  end
+
+  it "does not remove explicit defaults beside dynamic keyword options" do
+    code = <<~RUBY
+      class UserType < Types::BaseObject
+        field :name, String, **field_options, null: true
+        field :other, String, null: true, null: false
+        argument :id, ID, **argument_options, required: true
+        argument :other, ID, required: true, required: false
+      end
+    RUBY
+    config = GraphQL::Modernize::Config.new(
+      rules: {
+        "GQLM401" => { "enabled" => true },
+        "GQLM402" => { "enabled" => true }
+      }
+    )
+
+    [GraphQL::Modernize::Rules::RedundantRequiredTrue,
+     GraphQL::Modernize::Rules::RedundantNullTrue].each do |rule|
+      offenses, rewriter = run_rule(rule, code, config: config)
+      expect(offenses.map(&:safety)).to eq(%i[manual manual])
+      expect(rewriter.rewrite).to eq(code)
+    end
   end
 
   it "does not rewrite DSL-shaped calls inside executable scopes" do

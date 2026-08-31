@@ -37,7 +37,7 @@ module GraphQL
         rules = selected_rules(options, config)
         application = Application.new(config: config, rules: rules, jobs: options[:jobs],
                                       explicit_rule_ids: options[:only] || [])
-        application.ensure_write_safe!(force: options[:force]) if options[:write]
+        application.ensure_write_safe!(paths: paths, force: options[:force]) if options[:write]
         result = application.run(paths)
         warn_parse_errors(result) unless %w[text json].include?(options[:format])
         output = Reporter.render(options[:format], result, diff: options[:diff])

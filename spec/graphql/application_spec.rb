@@ -77,6 +77,66 @@ RSpec.describe GraphQL::Modernize::Application do
     end
   end
 
+  it "refuses writes when Git cannot inspect the working tree" do
+    success = instance_double(Process::Status, success?: true)
+    failure = instance_double(Process::Status, success?: false)
+    allow(Open3).to receive(:capture3).and_return(["true\n", "", success], ["", "broken index", failure])
+
+    application = described_class.new(config: GraphQL::Modernize::Config.new, rules: [], jobs: 1)
+    expect { application.ensure_write_safe! }.to raise_error(GraphQL::Modernize::Error, /broken index/)
+  end
+
+  it "refuses writes in a bare Git repository" do
+    success = instance_double(Process::Status, success?: true)
+    allow(Open3).to receive(:capture3).and_return(["false\n", "", success])
+
+    application = described_class.new(config: GraphQL::Modernize::Config.new, rules: [], jobs: 1)
+    expect { application.ensure_write_safe! }.to raise_error(GraphQL::Modernize::Error, /Git working tree/)
+  end
+
+  it "refuses write targets outside or linked through the Git working tree" do
+    Dir.mktmpdir do |directory|
+      root = File.join(directory, "repo")
+      outside = File.join(directory, "outside.rb")
+      linked = File.join(root, "linked.rb")
+      FileUtils.mkdir_p(root)
+      File.write(outside, "class Outside; end\n")
+      FileUtils.ln_s(outside, linked)
+      success = instance_double(Process::Status, success?: true)
+      allow(Open3).to receive(:capture3).and_return(
+        ["true\n", "", success], ["", "", success], ["#{root}\n", "", success]
+      )
+      application = described_class.new(config: GraphQL::Modernize::Config.new(root: root), rules: [], jobs: 1)
+
+      expect do
+        application.ensure_write_safe!(paths: [outside])
+      end.to raise_error(GraphQL::Modernize::Error, /outside the Git working tree/)
+
+      allow(Open3).to receive(:capture3).and_return(
+        ["true\n", "", success], ["", "", success], ["#{root}\n", "", success]
+      )
+      expect do
+        application.ensure_write_safe!(paths: [linked])
+      end.to raise_error(GraphQL::Modernize::Error, /symbolic link/)
+    end
+  end
+
+  it "refuses an untracked write target even when Git reports a clean tree" do
+    Dir.mktmpdir do |root|
+      path = File.join(root, "ignored.rb")
+      File.write(path, "class Ignored; end\n")
+      success = instance_double(Process::Status, success?: true)
+      allow(Open3).to receive(:capture3).and_return(
+        ["true\n", "", success], ["", "", success], ["#{root}\n", "", success], ["", "", success]
+      )
+      application = described_class.new(config: GraphQL::Modernize::Config.new(root: root), rules: [], jobs: 1)
+
+      expect do
+        application.ensure_write_safe!(paths: [path])
+      end.to raise_error(GraphQL::Modernize::Error, /not tracked by Git/)
+    end
+  end
+
   it "uses the configured rewrite rounds plus a convergence check" do
     Dir.mktmpdir do |root|
       path = File.join(root, "type.rb")

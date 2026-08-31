@@ -157,6 +157,23 @@ RSpec.describe "advanced migration rules" do
     expect(rewriter.rewrite).to eq(code)
   end
 
+  it "does not partially convert duplicate resolve options" do
+    code = <<~RUBY
+      class UserType < Types::BaseObject
+        field :name, String,
+              resolve: ->(obj, _args, _ctx) { obj.first },
+              resolve: ->(obj, _args, _ctx) { obj.last }
+        field :other, String, **options,
+              resolve: ->(obj, _args, _ctx) { obj.other }
+      end
+    RUBY
+    config = GraphQL::Modernize::Config.new(apply_unsafe: true)
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::ResolveFieldOption, code, config: config)
+
+    expect(offenses.map(&:safety)).to eq(%i[manual manual])
+    expect(rewriter.rewrite).to eq(code)
+  end
+
   it "rewrites parameter references by byte offset in UTF-8 source" do
     config = GraphQL::Modernize::Config.new(apply_unsafe: true)
     before = <<~RUBY
@@ -225,6 +242,25 @@ RSpec.describe "advanced migration rules" do
 
     expect(offenses).to be_empty
     expect(rewriter.rewrite).to eq(code)
+  end
+
+  it "does not accept receiver calls as schema migration configuration" do
+    code = <<~RUBY
+      class UserType < Types::BaseObject
+        def self.visible?(_context) = true
+      end
+
+      class AppSchema < GraphQL::Schema
+        helper.use GraphQL::Schema::Visibility
+        helper.complexity_cost_calculation_mode :legacy
+      end
+    RUBY
+    config = GraphQL::Modernize::Config.new(apply_unsafe: true)
+    visibility, = run_rule(GraphQL::Modernize::Rules::VisibilityPlugin, code, config: config)
+    complexity, = run_rule(GraphQL::Modernize::Rules::ComplexityCostMode, code, config: config)
+
+    expect(visibility.map(&:rule_id)).to eq(["GQLM307"])
+    expect(complexity.map(&:rule_id)).to eq(["GQLM501"])
   end
 
   it "moves existing Visibility after root types without changing conditional setup" do

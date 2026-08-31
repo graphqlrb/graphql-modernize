@@ -90,6 +90,22 @@ RSpec.describe GraphQL::Modernize::ClassHierarchy do
     expect(hierarchy.resolve_kind("DeferredInterface")).to be_nil
   end
 
+  it "does not treat receiver calls as schema configuration" do
+    types = source(<<~RUBY)
+      class AppSchema < GraphQL::Schema
+        helper.use GraphQL::Schema::Visibility
+        helper.query Types::Query
+        helper.complexity_cost_calculation_mode :legacy
+      end
+    RUBY
+    hierarchy = described_class.new.build([types])
+
+    expect(hierarchy.visibility_plugin?("AppSchema")).to be(false)
+    expect(hierarchy.calls_for("AppSchema").map(&:name)).not_to include(
+      :use, :query, :complexity_cost_calculation_mode
+    )
+  end
+
   it "only indexes class-level visibility hooks" do
     types = source(<<~RUBY)
       class UserType < Types::BaseObject

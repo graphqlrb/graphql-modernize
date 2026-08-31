@@ -28,6 +28,9 @@ git diff
 bundle exec rspec
 ```
 
+Without `--force`, writes require a clean Git working tree and every target
+must be a tracked, non-symlinked path inside that working tree.
+
 Unsafe rules require an explicit opt-in and can be run one at a time:
 
 ```bash

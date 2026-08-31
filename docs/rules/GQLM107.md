@@ -3,4 +3,5 @@
 Safety: safe. Removes `field:` and `function:` from field definitions. They
 were already no-ops before GraphQL-Ruby removed them in 2.0.1. Values that may
 have side effects are preserved and reported as manual. String-keyed hashes are
-not treated as legacy keyword options.
+not treated as legacy keyword options. Calls containing dynamic keyword
+expansion (`**options`) are also left unchanged for manual resolution.

@@ -8,6 +8,7 @@ module GraphQL
       def initialize(source_file, hierarchy)
         nodes = {}
         scopes = []
+        @call_receivers = {}.compare_by_identity
         dispatcher = Astel::Dispatcher.new
         callback = ->(node) { nodes[node.location.start_offset] = node }
         dispatcher.on(:class_node, callback)
@@ -15,6 +16,7 @@ module GraphQL
         dispatcher.on(:def_node) { |node| scopes << node }
         dispatcher.on(:lambda_node) { |node| scopes << node }
         dispatcher.on(:call_node) do |node|
+          @call_receivers[node.receiver] = true if node.receiver
           scopes << node.block if node.block && (node.receiver || node.name != :field)
         end
         dispatcher.run(source_file.ast)
@@ -52,6 +54,8 @@ module GraphQL
           byte_offset > start_offset && byte_offset < end_offset
         end
       end
+
+      def call_receiver?(node) = @call_receivers.key?(node)
     end
   end
 end

@@ -2,4 +2,5 @@
 
 Safety: safe, disabled by default. Removes `required: true`, the argument
 default since 1.13. Enable this rule explicitly when the style-only diff is
-acceptable.
+acceptable. Calls containing dynamic keyword expansion (`**options`) are left
+unchanged for manual resolution, as are duplicate `required:` options.

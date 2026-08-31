@@ -104,6 +104,19 @@ module GraphQL
           node.static_literal?
         end
 
+        def keyword_arguments(node, name)
+          keyword_hashes(node).flat_map(&:elements).select do |argument|
+            argument.is_a?(Prism::AssocNode) && argument.key.is_a?(Prism::SymbolNode) &&
+              argument.key.unescaped.to_sym == name
+          end
+        end
+
+        def dynamic_keyword_arguments?(node)
+          keyword_hashes(node).any? { |hash| hash.elements.any?(Prism::AssocSplatNode) }
+        end
+
+        def keyword_hashes(node) = node.arguments&.arguments&.grep(Prism::KeywordHashNode).to_a
+
         def constant_source(node)
           source = node&.location&.slice
           source&.delete_prefix("::")
