@@ -142,6 +142,7 @@ module GraphQL
 
         [from_version, target_version].compact.each do |version|
           raise Error, "versions must be strings" unless version.is_a?(String)
+          raise Error, "versions must not be empty" if version.strip.empty?
 
           Gem::Version.new(version)
         end

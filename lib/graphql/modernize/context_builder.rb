@@ -9,6 +9,18 @@ module GraphQL
         nodes = {}
         scopes = []
         @call_receivers = {}.compare_by_identity
+        @argument_calls = {}.compare_by_identity
+        @top_level_statements = {}.compare_by_identity
+        source_file.ast.statements.body.each { |node| @top_level_statements[node] = true }
+        # ponytail: nested calls rescan descendants; add a parent index only if deep DSLs become a bottleneck.
+        record_arguments = lambda do |call|
+          stack = call.arguments&.arguments&.dup || []
+          until stack.empty?
+            argument = stack.pop
+            @argument_calls[argument] = call
+            stack.concat(argument.compact_child_nodes)
+          end
+        end
         dispatcher = Astel::Dispatcher.new
         callback = ->(node) { nodes[node.location.start_offset] = node }
         dispatcher.on(:class_node, callback)
@@ -17,6 +29,7 @@ module GraphQL
         dispatcher.on(:lambda_node) { |node| scopes << node }
         dispatcher.on(:call_node) do |node|
           @call_receivers[node.receiver] = true if node.receiver
+          record_arguments.call(node)
           scopes << node.block if node.block && (node.receiver || node.name != :field)
         end
         dispatcher.run(source_file.ast)
@@ -56,6 +69,10 @@ module GraphQL
       end
 
       def call_receiver?(node) = @call_receivers.key?(node)
+
+      def argument_call(node) = @argument_calls[node]
+
+      def top_level_statement?(node) = @top_level_statements.key?(node)
     end
   end
 end

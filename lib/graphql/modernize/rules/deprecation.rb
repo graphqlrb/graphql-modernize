@@ -84,7 +84,7 @@ module GraphQL
 
           label = node.name.to_s.delete_suffix("=")
           value = node.arguments&.arguments&.first
-          unless standalone_line?(node) && value && safe_to_discard?(value)
+          unless @context.top_level_statement?(node) && standalone_line?(node) && value && safe_to_discard?(value)
             return add_offense(node.location, safety: :manual,
                                               message: "Remove `#{label}` manually without discarding side effects")
           end
@@ -128,6 +128,8 @@ module GraphQL
           return unless inside?(node, :schema)
           return if hierarchy.visible_definitions.empty? || !hierarchy.visibility_plugin_target?(context.class_name)
 
+          return if hierarchy.visibility_plugin_ambiguous?(context.class_name)
+
           definition = hierarchy.visible_definitions.first
           message = "visible? (#{definition.path}:#{definition.line}) requires a Visibility plugin"
           migration_errors = config.rule_options(self.class.metadata.id).fetch("migration_errors", true)
@@ -138,7 +140,14 @@ module GraphQL
         def on_visibility_call(node, _captures)
           context = context_for(node)
           return unless inside?(node, :schema)
-          return unless constant_source(node.arguments&.arguments&.first) == "GraphQL::Schema::Visibility"
+
+          plugin = constant_source(node.arguments&.arguments&.first)
+          return unless %w[GraphQL::Schema::Visibility GraphQL::Schema::Warden].include?(plugin)
+          if hierarchy.visibility_plugin_ambiguous?(context.class_name)
+            return add_offense(node.location, safety: :manual,
+                                              message: "Resolve conditional Visibility plugin configuration manually")
+          end
+          return unless plugin == "GraphQL::Schema::Visibility"
           return unless hierarchy.visibility_plugin_misplaced?(context.class_name, rewriter.source_file.path,
                                                                node.location.start_offset)
 
@@ -194,7 +203,7 @@ module GraphQL
           return unless inside?(node, :schema)
 
           configured = hierarchy.calls_for(context.class_name).any? do |call|
-            call.name == :allow_legacy_invalid_empty_selections_on_union
+            call.direct && call.name == :allow_legacy_invalid_empty_selections_on_union
           end
           configured ||= %i[legacy_invalid_empty_selections_on_union
                             legacy_invalid_empty_selections_on_union_with_type].any? do |name|

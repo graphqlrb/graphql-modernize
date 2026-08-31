@@ -147,13 +147,23 @@ RSpec.describe "advanced migration rules" do
     code = <<~RUBY
       class UserType < Types::BaseObject
         field :name, String, resolve: ->(obj, _args, _ctx) { obj.name }
+        field :other, String, resolve: ->(obj, _args, _ctx) { obj.other }
+        field :nickname, String, resolve: ->(obj, _args, _ctx) { obj.nickname }
+        field :nested, String, resolve: ->(obj, _args, _ctx) { obj.nested }
+        field :hidden, String, resolve: ->(obj, _args, _ctx) { obj.hidden }
 
-        def name = object.name
+        attr :other
+        alias nickname other
+        begin
+          def nested = object.nested
+        end
+        private attr_reader :hidden
+        private def name = object.name
       end
     RUBY
     offenses, rewriter = run_rule(GraphQL::Modernize::Rules::ResolveFieldOption, code, config: config)
 
-    expect(offenses.first.safety).to eq(:manual)
+    expect(offenses.map(&:safety)).to eq(%i[manual manual manual manual manual])
     expect(rewriter.rewrite).to eq(code)
   end
 
@@ -263,6 +273,32 @@ RSpec.describe "advanced migration rules" do
     expect(complexity.map(&:rule_id)).to eq(["GQLM501"])
   end
 
+  it "does not accept conditional calls as schema migration configuration" do
+    code = <<~RUBY
+      class UserType < Types::BaseObject
+        def self.visible?(_context) = true
+      end
+
+      class AppSchema < GraphQL::Schema
+        use GraphQL::Schema::Visibility if enabled
+        complexity_cost_calculation_mode :legacy if enabled
+      end
+    RUBY
+    config = GraphQL::Modernize::Config.new(apply_unsafe: true)
+    visibility, visibility_rewriter = run_rule(GraphQL::Modernize::Rules::VisibilityPlugin, code, config: config)
+    complexity, = run_rule(GraphQL::Modernize::Rules::ComplexityCostMode, code, config: config)
+
+    expect(visibility.map(&:rule_id)).to eq(["GQLM307"])
+    expect(visibility.map(&:safety)).to eq([:manual])
+    expect(visibility_rewriter.rewrite).to eq(code)
+    expect(complexity.map(&:rule_id)).to eq(["GQLM501"])
+
+    warden = code.sub("GraphQL::Schema::Visibility", "GraphQL::Schema::Warden")
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::VisibilityPlugin, warden, config: config)
+    expect(offenses.map(&:safety)).to eq([:manual])
+    expect(rewriter.rewrite).to eq(warden)
+  end
+
   it "moves existing Visibility after root types without changing conditional setup" do
     config = GraphQL::Modernize::Config.new(apply_unsafe: true)
     before = <<~RUBY
@@ -321,6 +357,32 @@ RSpec.describe "advanced migration rules" do
 
     expect(offenses.map(&:safety)).to eq([:manual])
     expect(rewriter.rewrite(validate: :parse)).to eq(code)
+  end
+
+  it "preserves pagination assignment results in nested expressions" do
+    code = <<~RUBY
+      class Configuration
+        def self.apply
+          GraphQL::Relay::ConnectionType.bidirectional_pagination = true
+        end
+
+        CALLBACK = lambda do
+          GraphQL::Relay::ConnectionType.default_nodes_field = false
+        end
+      end
+
+      RESULT = (
+        GraphQL::Relay::ConnectionType.bidirectional_pagination = true
+      )
+    RUBY
+
+    [GraphQL::Modernize::Rules::BidirectionalPagination,
+     GraphQL::Modernize::Rules::DefaultNodesField].each do |rule|
+      offenses, rewriter = run_rule(rule, code)
+      expect(offenses).not_to be_empty
+      expect(offenses.map(&:safety).uniq).to eq([:manual])
+      expect(rewriter.rewrite(validate: :parse)).to eq(code)
+    end
   end
 
   it "preserves pagination settings with trailing comments" do

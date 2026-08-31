@@ -106,12 +106,35 @@ RSpec.describe GraphQL::Modernize::ClassHierarchy do
     )
   end
 
+  it "does not treat conditional calls as guaranteed schema configuration" do
+    types = source(<<~RUBY)
+      class AppSchema < GraphQL::Schema
+        use GraphQL::Schema::Visibility if enabled
+        query Types::Query if enabled
+        complexity_cost_calculation_mode :legacy if enabled
+        if enabled
+          def self.complexity_cost_calculation_mode_for(_context) = :legacy
+        end
+      end
+    RUBY
+    hierarchy = described_class.new.build([types])
+
+    expect(hierarchy.visibility_plugin?("AppSchema")).to be(false)
+    expect(hierarchy.visibility_plugin_ambiguous?("AppSchema")).to be(true)
+    expect(hierarchy.calls_for("AppSchema").map(&:direct).uniq).to eq([false])
+    expect(hierarchy.class_method_defined?("AppSchema", :complexity_cost_calculation_mode_for)).to be(false)
+  end
+
   it "only indexes class-level visibility hooks" do
     types = source(<<~RUBY)
       class UserType < Types::BaseObject
         def visible?(_context) = true
 
         def installer
+          def self.visible?(_context) = true
+        end
+
+        if enabled
           def self.visible?(_context) = true
         end
       end

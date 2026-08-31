@@ -57,6 +57,27 @@ RSpec.describe "safe migration rules" do
     expect(rewriter.rewrite).to eq(code)
   end
 
+  it "only rewrites legacy scalars in type DSL arguments" do
+    code = <<~RUBY
+      class UserType < Types::BaseObject
+        field :name, types.String
+        field :tags, [types.String]
+        argument :id, types.ID
+        type types.Boolean
+        field :scores, types[types.Int]
+        audit(types.String)
+        LEGACY_TYPE = types.Int
+      end
+    RUBY
+    offenses, rewriter = run_rule(GraphQL::Modernize::Rules::TypesShortcut, code)
+    rewritten = rewriter.rewrite(validate: :parse)
+
+    expect(offenses.map(&:safety)).to eq(%i[safe safe safe safe safe manual manual])
+    expect(rewritten).to include("field :name, String", "field :tags, [String]", "argument :id, GraphQL::Types::ID",
+                                 "type GraphQL::Types::Boolean", "types[Integer]")
+    expect(rewritten).to include("audit(types.String)", "LEGACY_TYPE = types.Int")
+  end
+
   it "renames property without changing formatting" do
     expect_correction(
       GraphQL::Modernize::Rules::PropertyOption,

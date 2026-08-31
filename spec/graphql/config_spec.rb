@@ -55,6 +55,8 @@ RSpec.describe GraphQL::Modernize::Config do
       .to raise_error(GraphQL::Modernize::Error, /ruby_version/)
     expect { described_class.new(target_version: 2.6) }
       .to raise_error(GraphQL::Modernize::Error, /version/)
+    expect { described_class.new(target_version: " ") }
+      .to raise_error(GraphQL::Modernize::Error, /empty/)
   end
 
   it "normalizes configured rule IDs" do

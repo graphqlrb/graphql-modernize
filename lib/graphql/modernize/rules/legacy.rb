@@ -188,6 +188,7 @@ module GraphQL
       end
 
       class TypesShortcut < Base
+        TYPE_DSL_CALLS = %i[argument field input_field type].freeze
         REPLACEMENTS = {
           "Boolean" => "GraphQL::Types::Boolean",
           "Float" => "Float",
@@ -212,10 +213,25 @@ module GraphQL
             return add_offense(node.location, safety: :manual,
                                               message: "Migrate chained `types.#{name}` to the class API manually")
           end
+          unless type_dsl_argument?(node)
+            return add_offense(node.location, safety: :manual,
+                                              message: "Review `types.#{name}` outside the type DSL manually")
+          end
 
           add_offense(node.location, message: "Replace `types.#{name}` with `#{replacement}`") do |rw|
             rw.replace(node.location, replacement)
           end
+        end
+
+        private
+
+        def type_dsl_argument?(node)
+          call = @context.argument_call(node)
+          return false unless call
+          return true if call.receiver.nil? && TYPE_DSL_CALLS.include?(call.name)
+
+          call.name == :[] && call.receiver.is_a?(Prism::CallNode) && call.receiver.receiver.nil? &&
+            call.receiver.name == :types
         end
       end
 

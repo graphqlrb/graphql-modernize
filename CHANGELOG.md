@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Preserve obsolete pagination assignment results in nested expressions for
+  manual review.
+- Restrict legacy scalar rewrites to GraphQL type DSL argument positions.
+- Do not treat conditional schema calls or method definitions as guaranteed,
+  while recognizing static Ruby method declarations before generating resolvers.
+- Reject blank migration versions instead of silently disabling rules.
 - Stop safely on Git inspection failures and unsafe write targets, ignore
   receiver-shaped schema calls, and preserve chained type wrappers, dynamic
   keyword expansions, and duplicate legacy options for review.

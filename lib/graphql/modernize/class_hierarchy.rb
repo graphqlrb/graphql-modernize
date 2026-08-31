@@ -2,11 +2,90 @@
 
 module GraphQL
   module Modernize
-    class ClassHierarchy
-      Declaration = Data.define(:path, :start_offset, :end_offset, :name, :superclass, :module_node)
-      Definition = Data.define(:class_name, :path, :line)
-      Call = Data.define(:name, :first_argument, :path, :start_offset)
+    ClassDeclaration = Data.define(:path, :start_offset, :end_offset, :name, :superclass, :module_node)
+    VisibleDefinition = Data.define(:class_name, :path, :line)
+    SchemaCall = Data.define(:name, :first_argument, :path, :start_offset, :direct)
+    HierarchyNodes = Data.define(:declarations, :calls, :method_nodes, :singleton_classes, :scopes)
 
+    module HierarchyScanner
+      module_function
+
+      def call(ast)
+        declarations = []
+        calls = []
+        methods = []
+        singleton_classes = []
+        scopes = []
+        dispatcher = Astel::Dispatcher.new
+        dispatcher.on(:class_node) { |node| declarations << [node, false] }
+        dispatcher.on(:module_node) { |node| declarations << [node, true] }
+        dispatcher.on(:call_node) { |node| calls << node if node.receiver.nil? }
+        dispatcher.on(:def_node) do |node|
+          methods << node
+          scopes << node
+        end
+        dispatcher.on(:alias_method_node) { |node| methods << node }
+        dispatcher.on(:block_node) { |node| scopes << node }
+        dispatcher.on(:lambda_node) { |node| scopes << node }
+        dispatcher.on(:singleton_class_node) do |node|
+          singleton_classes << node if node.expression.is_a?(Prism::SelfNode)
+        end
+        dispatcher.run(ast)
+        HierarchyNodes.new(declarations: declarations, calls: calls, method_nodes: methods,
+                           singleton_classes: singleton_classes, scopes: scopes)
+      end
+    end
+
+    module MethodDeclarations
+      module_function
+
+      def body_statements(nodes)
+        {}.compare_by_identity.tap do |result|
+          add = lambda do |statements|
+            statements&.body&.each do |statement|
+              result[statement] = true
+              plain_begin = statement.is_a?(Prism::BeginNode) && !statement.rescue_clause &&
+                            !statement.else_clause && !statement.ensure_clause
+              add.call(statement.statements) if plain_begin
+            end
+          end
+          nodes.each { |node| add.call(node.body) }
+        end
+      end
+
+      def select(methods, calls, body_statements)
+        wrapped = calls.select do |call|
+          body_statements.key?(call) && %i[private protected public].include?(call.name)
+        end.flat_map { |call| call.arguments&.arguments.to_a }.grep(Prism::DefNode)
+        methods.select { |method| body_statements.key?(method) || wrapped.include?(method) }
+      end
+
+      def calls(calls, body_statements)
+        direct = calls.select { |call| body_statements.key?(call) }
+        wrapped = direct.select { |call| %i[private protected public].include?(call.name) }
+                        .flat_map { |call| call.arguments&.arguments.to_a }.grep(Prism::CallNode)
+        direct.concat(wrapped).to_h { |call| [call, true] }.compare_by_identity
+      end
+
+      def names(call)
+        names = call.arguments&.arguments.to_a.filter_map do |argument|
+          argument.unescaped.to_sym if argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode)
+        end
+        return names if %i[attr attr_reader attr_accessor].include?(call.name)
+        return names.first(1) if %i[alias_method define_method define_singleton_method].include?(call.name)
+
+        []
+      end
+
+      def class_method?(call, singleton_classes)
+        call.name == :define_singleton_method || singleton_classes.any? do |scope|
+          call.location.start_offset > scope.location.start_offset &&
+            call.location.end_offset < scope.location.end_offset
+        end
+      end
+    end
+
+    class ClassHierarchy
       DIRECT_KINDS = {
         "GraphQL::Schema::Object" => :object,
         "GraphQL::Schema::InputObject" => :input_object,
@@ -68,6 +147,13 @@ module GraphQL
 
       def visibility_plugin?(class_name)
         calls_for(class_name).any? do |call|
+          call.direct && call.name == :use &&
+            %w[GraphQL::Schema::Visibility GraphQL::Schema::Warden].include?(call.first_argument)
+        end
+      end
+
+      def visibility_plugin_ambiguous?(class_name)
+        !visibility_plugin?(class_name) && calls_for(class_name).any? do |call|
           call.name == :use && %w[GraphQL::Schema::Visibility GraphQL::Schema::Warden].include?(call.first_argument)
         end
       end
@@ -82,7 +168,8 @@ module GraphQL
 
       def visibility_plugin_misplaced?(class_name, path, start_offset)
         @calls[normalize(class_name)].any? do |call|
-          call.path == path && call.start_offset > start_offset && %i[query mutation subscription].include?(call.name)
+          call.direct && call.path == path && call.start_offset > start_offset &&
+            %i[query mutation subscription].include?(call.name)
         end
       end
 
@@ -93,30 +180,21 @@ module GraphQL
       def defined_in?(table, class_name, name) = ancestors(class_name).any? { |ancestor| table[ancestor][name.to_sym] }
 
       def index(source_file)
-        nodes = []
-        includes = []
-        calls = []
-        methods = []
-        singleton_classes = []
-        scopes = []
-        dispatcher = Astel::Dispatcher.new
-        dispatcher.on(:class_node) { |node| nodes << [node, false] }
-        dispatcher.on(:module_node) { |node| nodes << [node, true] }
-        dispatcher.on(:call_node) do |node|
-          calls << node if node.receiver.nil?
-          includes << node if node.receiver.nil? && node.name == :include &&
-                              node.arguments&.arguments&.any? { |arg| constant_name(arg) == "GraphQL::Schema::Interface" }
+        scan = HierarchyScanner.call(source_file.ast)
+        nodes = scan.declarations
+        calls = scan.calls
+        methods = scan.method_nodes
+        singleton_classes = scan.singleton_classes
+        includes = calls.select do |node|
+          node.name == :include &&
+            node.arguments&.arguments&.any? { |arg| constant_name(arg) == "GraphQL::Schema::Interface" }
         end
-        dispatcher.on(:def_node) do |node|
-          methods << node
-          scopes << node
-        end
-        dispatcher.on(:block_node) { |node| scopes << node }
-        dispatcher.on(:lambda_node) { |node| scopes << node }
-        dispatcher.on(:singleton_class_node) do |node|
-          singleton_classes << node if node.expression.is_a?(Prism::SelfNode)
-        end
-        dispatcher.run(source_file.ast)
+
+        body_statements = MethodDeclarations.body_statements(nodes.map(&:first) + singleton_classes)
+        includes.select! { |call| body_statements.key?(call) }
+        calls.reject! { |call| scan.scopes.any? { |scope| nested_in?(scope, call) } }
+        methods = MethodDeclarations.select(methods, calls, body_statements)
+        method_calls = MethodDeclarations.calls(calls, body_statements)
 
         name_cache = {}.compare_by_identity
         resolve_name = lambda do |node|
@@ -135,45 +213,55 @@ module GraphQL
 
         entries = nodes.sort_by { |node, _module_node| node.location.start_offset }.map do |node, module_node|
           superclass = node.respond_to?(:superclass) ? constant_name(node.superclass) : nil
-          Declaration.new(path: source_file.path, start_offset: node.location.start_offset,
-                          end_offset: node.location.end_offset, name: resolve_name.call(node),
-                          superclass: superclass, module_node: module_node)
+          ClassDeclaration.new(path: source_file.path, start_offset: node.location.start_offset,
+                               end_offset: node.location.end_offset, name: resolve_name.call(node),
+                               superclass: superclass, module_node: module_node)
         end
         offset_map = entries.to_h { |entry| [entry.start_offset, entry] }
         @declarations[source_file.path] = offset_map
-        index_metadata(source_file, entries, includes, calls, methods, singleton_classes, scopes)
+        index_metadata(source_file, entries, includes, calls, methods, singleton_classes, body_statements, method_calls)
       end
 
-      def index_metadata(source_file, entries, includes, calls, methods, singleton_classes, scopes)
+      def index_metadata(source_file, entries, includes, calls, methods, singleton_classes, body_statements,
+                         method_calls)
         entries.each do |entry|
           @declared_names[entry.name] = true
           @superclasses[entry.name] = entry.superclass if entry.superclass
         end
-        includes.reject { |call| scopes.any? { |scope| nested_in?(scope, call) } }.each do |call|
+        includes.each do |call|
           owner = owner_for(entries, call)
           @interface_names[owner.name] = true if owner&.module_node
         end
-        calls.reject { |call| scopes.any? { |scope| nested_in?(scope, call) } }.each do |call|
+        calls.each do |call|
           owner = owner_for(entries, call)
-          if owner
-            @calls[owner.name] << Call.new(name: call.name, first_argument: first_argument(call),
-                                           path: source_file.path, start_offset: call.location.start_offset)
+          next unless owner
+
+          @calls[owner.name] << SchemaCall.new(name: call.name, first_argument: first_argument(call),
+                                               path: source_file.path, start_offset: call.location.start_offset,
+                                               direct: body_statements.key?(call))
+          names = MethodDeclarations.names(call)
+          if method_calls.key?(call) && !names.empty?
+            table = MethodDeclarations.class_method?(call, singleton_classes) ? @class_methods : @methods
+            names.each { |name| table[owner.name][name] = true }
           end
         end
         methods.each do |node|
-          next if scopes.any? { |scope| !scope.equal?(node) && nested_in?(scope, node) }
-
           owner = owner_for(entries, node)
           next unless owner
 
           inside_singleton = singleton_classes.any? { |scope| nested_in?(scope, node) }
+          if node.is_a?(Prism::AliasMethodNode)
+            (inside_singleton ? @class_methods : @methods)[owner.name][node.new_name.unescaped.to_sym] = true
+            next
+          end
+
           next if node.receiver && !node.receiver.is_a?(Prism::SelfNode)
 
           class_method = node.receiver.is_a?(Prism::SelfNode) || inside_singleton
           (class_method ? @class_methods : @methods)[owner.name][node.name] = true
           if class_method && node.name == :visible?
-            @visible_definitions << Definition.new(class_name: owner.name, path: source_file.path,
-                                                   line: node.location.start_line)
+            @visible_definitions << VisibleDefinition.new(class_name: owner.name, path: source_file.path,
+                                                          line: node.location.start_line)
           end
         end
       end
@@ -203,10 +291,7 @@ module GraphQL
         node.location.start_offset > scope.location.start_offset && node.location.end_offset < scope.location.end_offset
       end
 
-      def first_argument(call)
-        argument = call.arguments&.arguments&.first
-        constant_name(argument) || argument&.location&.slice
-      end
+      def first_argument(call) = (arg = call.arguments&.arguments&.first) && (constant_name(arg) || arg.location.slice)
 
       def direct_kind(name)
         DIRECT_KINDS[name] || @configured_kinds[name] || (@interface_names[name] && :interface) ||
@@ -233,11 +318,9 @@ module GraphQL
       end
 
       def constant_name(node)
-        return unless node
         return node.name.to_s if node.is_a?(Prism::ConstantReadNode)
-        return node.location.slice.delete_prefix("::") if node.is_a?(Prism::ConstantPathNode)
 
-        nil
+        node.location.slice.delete_prefix("::") if node.is_a?(Prism::ConstantPathNode)
       end
 
       def normalize(name) = name.to_s.delete_prefix("::")
